@@ -14,6 +14,9 @@ right command when the versions differ.
 ## [Unreleased]
 
 ### Fixed
+- `add_text` and `edit_text` no longer replace an unknown font silently. `add_text` now reports
+  `font` (the applied font), both tools include `requested_font` when it differs from `font`, and
+  both add a `warning` naming the requested and fallback fonts when the font wasn't found (#124).
 - `export_sprite_sheet` works on GIMP 3. It failed every time with
   `ImageBaseType has no attribute 'RGBA'`, and the sheet now keeps its transparent background
   instead of being flattened (#64).
