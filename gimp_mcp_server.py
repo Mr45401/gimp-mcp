@@ -539,7 +539,8 @@ def get_state_snapshot(
 
     Parameters:
     - image_index: Which open image to snapshot (default: 0 = most recent)
-    - max_size: Maximum width/height of the returned preview in pixels (default: 512)
+    - max_size: Maximum width/height of the returned preview in pixels (default: 512,
+                0 = no scaling)
     - region: Optional dict {x, y, width, height} to zoom into a specific area
               e.g. {"x": 200, "y": 300, "width": 100, "height": 80} for mouth area
     - label: Optional annotation label (logged but not drawn — for agent bookkeeping)
@@ -558,6 +559,10 @@ def get_state_snapshot(
     try:
         if label:
             print(f"[snapshot] {label}")
+        # The plug-in would report this as max_width / max_height, which the
+        # caller never passed
+        if max_size is not None and max_size < 0:
+            raise ValueError(f"max_size must be at least 0 (0 means no scaling), got {max_size}")
         conn = get_gimp_connection()
         params: dict = {"image_index": image_index}
         if max_size:
