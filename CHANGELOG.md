@@ -18,7 +18,8 @@ right command when the versions differ.
   copied only the top layer, even when it was hidden, so they could show the wrong pixels. Both
   full and region snapshots now render the visible composite (blend modes, layer groups and
   layer filters included), so a region matches the same rectangle of a full snapshot. Taking a
-  snapshot no longer replaces your selection or clipboard (#17).
+  snapshot no longer replaces your selection or clipboard. Images above 8 bits per channel come
+  back as 16-bit PNGs, with colours converted to sRGB (#17).
 - `get_image_bitmap` honours `image_index` instead of always capturing the first image, and the
   MCP tool now accepts it.
 - `get_image_bitmap` and `get_state_snapshot` return an error when nothing is visible (every

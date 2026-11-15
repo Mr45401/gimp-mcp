@@ -168,6 +168,9 @@ class FakeImage:
     def get_base_type(self):
         return 0
 
+    def get_precision(self):
+        return 150  # U8_NON_LINEAR
+
     def insert_layer(self, *a):
         pass
 
@@ -311,6 +314,14 @@ def install_gi_stub():
                 img = FakeImage()
                 TEMP_IMAGES.append(img)
                 return img
+
+            @staticmethod
+            def new_with_precision(width, height, base_type, precision):
+                return Gimp.Image.new(width, height, base_type)
+
+        @staticmethod
+        def Precision(value):
+            return value
 
         class Layer:
             @staticmethod

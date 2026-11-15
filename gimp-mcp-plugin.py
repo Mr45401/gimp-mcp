@@ -1913,7 +1913,15 @@ class MCPPlugin(Gimp.PlugIn):
         The caller deletes it. Commands run one at a time under command_lock, so
         no other command sees the temporary image in Gimp.get_images().
         """
-        temp = Gimp.Image.new(width, height, Gimp.ImageBaseType.RGB)
+        # Keep the source's bit depth (PNG export writes 16-bit for anything above
+        # 8), but make the image non-linear sRGB: new_from_visible converts into
+        # it, so the PNG's pixels are sRGB as PNG readers assume. Copying the
+        # source's profile instead would leave e.g. Adobe RGB values in a PNG
+        # tagged sRGB, since file-png-export doesn't embed profiles by default.
+        # Precision values are 100 * component type plus 0 (linear),
+        # 50 (non-linear) or 75 (perceptual).
+        precision = Gimp.Precision(int(image.get_precision()) // 100 * 100 + 50)
+        temp = Gimp.Image.new_with_precision(width, height, Gimp.ImageBaseType.RGB, precision)
         try:
             # new_from_visible renders the whole canvas, and the rectangle is cut
             # out afterwards, so a small region of a large image still costs a
