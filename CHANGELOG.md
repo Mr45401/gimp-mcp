@@ -14,6 +14,17 @@ right command when the versions differ.
 ## [Unreleased]
 
 ### Fixed
+- `get_image_bitmap` and `get_state_snapshot` region snapshots show the visible image. They
+  copied only the top layer, even when it was hidden, so they could show the wrong pixels. Both
+  full and region snapshots now render the visible composite (blend modes, layer groups and
+  layer filters included), so a region matches the same rectangle of a full snapshot. Taking a
+  snapshot no longer replaces your selection or clipboard (#17).
+- `get_image_bitmap` honours `image_index` instead of always capturing the first image, and the
+  MCP tool now accepts it.
+- `get_image_bitmap` and `get_state_snapshot` return an error when nothing is visible (every
+  layer hidden or at 0% opacity), when a region's width or height is 0, or when `max_width` /
+  `max_height` is below 1. Before, these returned a blank or wrong image, a misleading error
+  or a division by zero.
 - `export_sprite_sheet` works on GIMP 3. It failed every time with
   `ImageBaseType has no attribute 'RGBA'`, and the sheet now keeps its transparent background
   instead of being flattened (#64).
