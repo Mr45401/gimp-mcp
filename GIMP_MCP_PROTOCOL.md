@@ -283,8 +283,8 @@ image = get_image_bitmap()
 
 **Parameters:**
 - `image_index` (integer, optional): Index of the image to capture as `list_images` numbers it (default 0); the snapshot renders the visible composite, layer filters included, and returns an error when no layer is visible
-- `max_width` (integer, optional): Maximum width for full image scaling (center inside), at least 1
-- `max_height` (integer, optional): Maximum height for full image scaling (center inside), at least 1
+- `max_width` (integer, optional): Maximum width for scaling the full image, or a region without its own bounds (center inside), at least 1
+- `max_height` (integer, optional): Maximum height for scaling the full image, or a region without its own bounds (center inside), at least 1
 - `region` (object, optional): Rectangle to extract, with integer keys:
   - `origin_x`, `origin_y`: Top-left corner, at least 0 (required with `region`)
   - `width`, `height`: Size of the rectangle, at least 1 (required with `region`)

@@ -20,12 +20,14 @@ right command when the versions differ.
   layer filters included), so a region matches the same rectangle of a full snapshot. Taking a
   snapshot no longer replaces your selection or clipboard. Images above 8 bits per channel come
   back as 16-bit PNGs, with colours converted to sRGB (#17).
-- `get_image_bitmap` honours `image_index` instead of always capturing the first image, and the
-  MCP tool now accepts it.
+- `get_image_bitmap` and `get_state_snapshot` honour `image_index` instead of always capturing
+  the first image, and an index past the last open image is an error. The `get_image_bitmap`
+  MCP tool now accepts `image_index`.
 - `get_image_bitmap` and `get_state_snapshot` return an error when nothing is visible (every
-  layer hidden or at 0% opacity), when a region's width or height is 0, or when `max_width` /
-  `max_height` is below 1. Before, these returned a blank or wrong image, a misleading error
-  or a division by zero.
+  layer hidden or at 0% opacity), when a region's width or height is 0, or when a scaling bound
+  is below 1 (`get_image_bitmap`'s `max_width` / `max_height`, or a negative `max_size` for
+  `get_state_snapshot`, where 0 still means no scaling). Before, these returned a blank or wrong
+  image, a misleading error or a division by zero.
 - `export_sprite_sheet` works on GIMP 3. It failed every time with
   `ImageBaseType has no attribute 'RGBA'`, and the sheet now keeps its transparent background
   instead of being flattened (#64).
