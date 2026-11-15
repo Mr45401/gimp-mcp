@@ -1921,12 +1921,15 @@ class MCPPlugin(Gimp.PlugIn):
         # Precision values are 100 * component type plus 0 (linear),
         # 50 (non-linear) or 75 (perceptual).
         precision = Gimp.Precision(int(image.get_precision()) // 100 * 100 + 50)
-        temp = Gimp.Image.new_with_precision(width, height, Gimp.ImageBaseType.RGB, precision)
+        temp = self._check_item(
+            Gimp.Image.new_with_precision(width, height, Gimp.ImageBaseType.RGB, precision),
+            "Creating the snapshot image")
         try:
             # new_from_visible renders the whole canvas, and the rectangle is cut
             # out afterwards, so a small region of a large image still costs a
             # full-size composite (8000x8000 RGBA is about 256 MB at 8 bits)
-            layer = Gimp.Layer.new_from_visible(image, temp, "visible")
+            layer = self._check_item(Gimp.Layer.new_from_visible(image, temp, "visible"),
+                                     "Rendering the visible layers")
             self._check_ok(temp.insert_layer(layer, None, 0), "Adding the visible layer")
             self._check_ok(layer.set_offsets(-x, -y), "Positioning the visible layer")
             self._check_ok(layer.resize_to_image_size(), "Cropping the visible layer")
