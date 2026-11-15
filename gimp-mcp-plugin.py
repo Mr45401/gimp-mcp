@@ -876,30 +876,32 @@ class MCPPlugin(Gimp.PlugIn):
                     }
 
             # Extract region parameters if provided
-            region = params.get("region", {})
+            region = params.get("region")
+            if region is None:
+                region = {}
+            if not isinstance(region, dict):
+                return {
+                    "status": "error",
+                    "error": f"'region' must be an object, got {type(region).__name__}"
+                }
 
-            # Validate region parameters if provided
-            if region:
-                # Validate region parameter types
-                for key, expected_type in [("origin_x", int), ("origin_y", int), 
-                                         ("width", int), ("height", int),
-                                         ("max_width", int), ("max_height", int)]:
-                    if key in region and region[key] is not None:
-                        if not isinstance(region[key], expected_type):
-                            return {
-                                "status": "error",
-                                "error": f"Region parameter '{key}' must be of type {expected_type.__name__}, got {type(region[key]).__name__}"
-                            }
-                        if region[key] < 0:
-                            return {
-                                "status": "error", 
-                                "error": f"Region parameter '{key}' must be non-negative, got {region[key]}"
-                            }
-                        if key in ("max_width", "max_height") and region[key] < 1:
-                            return {
-                                "status": "error",
-                                "error": f"Region parameter '{key}' must be at least 1, got {region[key]}"
-                            }
+            # Region values are integers: the origin at least 0, sizes and
+            # scaling bounds at least 1 (an empty region can't be rendered)
+            for key, minimum in [("origin_x", 0), ("origin_y", 0), ("width", 1), ("height", 1),
+                                 ("max_width", 1), ("max_height", 1)]:
+                value = region.get(key)
+                if value is None:
+                    continue
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return {
+                        "status": "error",
+                        "error": f"Region parameter '{key}' must be of type int, got {type(value).__name__}"
+                    }
+                if value < minimum:
+                    return {
+                        "status": "error",
+                        "error": f"Region parameter '{key}' must be at least {minimum}, got {value}"
+                    }
             
             origin_x = region.get("origin_x")
             origin_y = region.get("origin_y")
@@ -953,12 +955,6 @@ class MCPPlugin(Gimp.PlugIn):
                     return {
                         "status": "error",
                         "error": "For region selection, all parameters are required: origin_x, origin_y, width, height"
-                    }
-
-                if region_width < 1 or region_height < 1:
-                    return {
-                        "status": "error",
-                        "error": f"Region width and height must be at least 1, got {region_width}x{region_height}"
                     }
 
                 # Validate region bounds
