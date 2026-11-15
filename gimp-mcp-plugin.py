@@ -30,7 +30,6 @@ import signal
 LARGE_SCALING_THRESHOLD = 4.0  # Warn if scaling ratio exceeds this value
 MAX_REGION_SIZE = 8192  # Maximum region dimension in pixels
 DEFAULT_TIMEOUT_SECONDS = 30  # Default timeout for operations
-TEMP_IMAGE_PARASITE = "gimp-mcp-temp"  # Marks images the plug-in creates for one command
 VIGNETTE_SHAPES = ("circle", "square", "diamond", "horizontal", "vertical")  # gegl:vignette shape
 
 # Reported to the MCP server, which warns when it doesn't match its own version.
@@ -1132,7 +1131,7 @@ class MCPPlugin(Gimp.PlugIn):
             print("Getting current image metadata...")
             
             # Get the current images
-            images = self._open_images()
+            images = Gimp.get_images()
             if not images:
                 return {
                     "status": "error",
@@ -1431,7 +1430,7 @@ class MCPPlugin(Gimp.PlugIn):
             
             # Current session information
             try:
-                images = self._open_images()
+                images = Gimp.get_images()
                 gimp_info["session"] = {
                     "num_open_images": len(images),
                     "has_open_images": len(images) > 0,
@@ -1881,23 +1880,14 @@ class MCPPlugin(Gimp.PlugIn):
             print(f"[MCP] displays_flush failed after opening display: {flush_err}")
         return True
 
-    def _open_images(self):
-        """Return Gimp.get_images() without the temporary images of running commands.
-
-        A new image goes first in Gimp.get_images(), so a temporary image would
-        shift the image_index of every other image while it exists.
-        """
-        return [image for image in Gimp.get_images()
-                if image.get_parasite(TEMP_IMAGE_PARASITE) is None]
-
     def _render_visible(self, image, x, y, width, height):
         """Return a temporary image holding the visible composite of a rectangle of image.
 
-        The caller deletes it; until then _open_images skips it.
+        The caller deletes it. Commands run one at a time under command_lock, so
+        no other command sees the temporary image in Gimp.get_images().
         """
         temp = Gimp.Image.new(width, height, Gimp.ImageBaseType.RGB)
         try:
-            temp.attach_parasite(Gimp.Parasite.new(TEMP_IMAGE_PARASITE, 0, b"1"))
             layer = Gimp.Layer.new_from_visible(image, temp, "visible")
             temp.insert_layer(layer, None, 0)
             layer.set_offsets(-x, -y)
@@ -1908,8 +1898,8 @@ class MCPPlugin(Gimp.PlugIn):
         return temp
 
     def _get_image(self, image_index):
-        """Return the image at image_index from _open_images(), raise if none open."""
-        images = self._open_images()
+        """Return the image at image_index from Gimp.get_images(), raise if none open."""
+        images = Gimp.get_images()
         if not images:
             raise RuntimeError("No images are currently open in GIMP")
         if image_index >= len(images):
@@ -2208,7 +2198,7 @@ class MCPPlugin(Gimp.PlugIn):
             image_index  = params.get("image_index", None)
             self._check_export_args(fmt, quality)
 
-            images = self._open_images()
+            images = Gimp.get_images()
             if not images:
                 return {"status": "error", "error": "No images open"}
 
@@ -4088,7 +4078,7 @@ class MCPPlugin(Gimp.PlugIn):
             height          = params.get("height", None)
             scale_factor    = params.get("scale_factor", None)
             maintain_aspect = bool(params.get("maintain_aspect", True))
-            images  = self._open_images()
+            images  = Gimp.get_images()
             results = []
             for img in images:
                 src_w = img.get_width()
@@ -4198,7 +4188,7 @@ class MCPPlugin(Gimp.PlugIn):
             import math
 
             if source == "images":
-                frames = self._open_images()
+                frames = Gimp.get_images()
             else:
                 src_image = self._get_image(image_index)
                 frames = src_image.get_layers()
@@ -4322,7 +4312,7 @@ class MCPPlugin(Gimp.PlugIn):
     def _list_images(self, params):
         """List all open images."""
         try:
-            images = self._open_images()
+            images = Gimp.get_images()
             image_list = []
             base_type_map = {
                 Gimp.ImageBaseType.RGB:     "RGB",
