@@ -860,9 +860,24 @@ class MCPPlugin(Gimp.PlugIn):
             max_height = params.get("max_height")
             image_index = params.get("image_index", 0)
 
+            # Scaling bounds below 1 would divide by zero or scale to nothing
+            for key, value in [("max_width", max_width), ("max_height", max_height)]:
+                if value is None:
+                    continue
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return {
+                        "status": "error",
+                        "error": f"'{key}' must be of type int, got {type(value).__name__}"
+                    }
+                if value < 1:
+                    return {
+                        "status": "error",
+                        "error": f"'{key}' must be at least 1, got {value}"
+                    }
+
             # Extract region parameters if provided
             region = params.get("region", {})
-            
+
             # Validate region parameters if provided
             if region:
                 # Validate region parameter types
@@ -879,6 +894,11 @@ class MCPPlugin(Gimp.PlugIn):
                             return {
                                 "status": "error", 
                                 "error": f"Region parameter '{key}' must be non-negative, got {region[key]}"
+                            }
+                        if key in ("max_width", "max_height") and region[key] < 1:
+                            return {
+                                "status": "error",
+                                "error": f"Region parameter '{key}' must be at least 1, got {region[key]}"
                             }
             
             origin_x = region.get("origin_x")
