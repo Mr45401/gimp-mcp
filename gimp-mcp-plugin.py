@@ -927,12 +927,13 @@ class MCPPlugin(Gimp.PlugIn):
             orig_img_width = original_image.get_width()
             orig_img_height = original_image.get_height()
 
-            # PNG export flattens visible layers only; with none visible it falls back
-            # to a hidden layer's pixels, so report an error instead (groups count only
-            # when they contain a visible layer)
+            # With nothing visible the snapshot would be blank (or, with every layer
+            # hidden, show a hidden layer's pixels), so report an error instead. A layer
+            # counts only if it is visible with opacity above 0; a group counts only
+            # when it does and contains such a layer
             def has_visible(items):
                 for item in items:
-                    if not item.get_visible():
+                    if not item.get_visible() or item.get_opacity() <= 0:
                         continue
                     if not item.is_group() or has_visible(item.get_children()):
                         return True
@@ -941,7 +942,7 @@ class MCPPlugin(Gimp.PlugIn):
             if not has_visible(original_image.get_layers()):
                 return {
                     "status": "error",
-                    "error": "No visible layers in the image (all layers are hidden or the image has no layers)"
+                    "error": "No visible layers in the image (all layers are hidden or fully transparent, or the image has no layers)"
                 }
 
             # Validate region before creating any temporary image
