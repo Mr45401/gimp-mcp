@@ -128,6 +128,7 @@ class FakeDrawable:
         return self.curves_result
 
 
+PRECISIONS = []  # precisions passed to Gimp.Image.new_with_precision
 TEMP_IMAGES = []  # images the plug-in creates (new or duplicate), to check cleanup
 
 
@@ -317,6 +318,7 @@ def install_gi_stub():
 
             @staticmethod
             def new_with_precision(width, height, base_type, precision):
+                PRECISIONS.append(precision)
                 return Gimp.Image.new(width, height, base_type)
 
         @staticmethod
@@ -605,6 +607,74 @@ def main():
                f"open deleted {OPEN_IMAGE.deleted}")
     DIRECT_OK["value"] = True
     FakePDB.last_error = None
+
+    # The bitmap preview rejects bad arguments and images with nothing visible
+    # before it creates any temporary image.
+    region = {"origin_x": 0, "origin_y": 0, "width": 10, "height": 10}
+    for params, needle in (
+            ({"image_index": -1}, "image_index must be a non-negative integer"),
+            ({"image_index": 0.5}, "image_index must be a non-negative integer"),
+            ({"image_index": True}, "image_index must be a non-negative integer"),
+            ({"image_index": "0"}, "image_index must be a non-negative integer"),
+            ({"image_index": 3}, "out of range"),
+            ({"max_width": 0, "max_height": 10}, "'max_width' must be at least 1"),
+            ({"max_width": 10, "max_height": -1}, "'max_height' must be at least 1"),
+            ({"max_width": 1.5, "max_height": 10}, "'max_width' must be of type int"),
+            ({"max_width": True, "max_height": 10}, "'max_width' must be of type int"),
+            ({"region": "0,0,10,10"}, "'region' must be an object"),
+            ({"region": dict(region, width=0)}, "'width' must be at least 1"),
+            ({"region": dict(region, height=True)}, "'height' must be of type int"),
+            ({"region": dict(region, origin_x=-1)}, "'origin_x' must be at least 0"),
+            ({"region": dict(region, max_width=0, max_height=5)}, "'max_width' must be at least 1"),
+            ({"region": dict(region, max_width=5, max_height=-2)}, "'max_height' must be at least 1"),
+            ({"region": {"origin_x": 0, "origin_y": 0}}, "all parameters are required"),
+            ({"region": dict(region, origin_x=95)}, "Region bounds invalid")):
+        TEMP_IMAGES.clear()
+        r = plugin._get_current_image_bitmap(params)
+        check(f"bitmap preview rejects {params}",
+              None if r["status"] == "error" and needle in r["error"] and not TEMP_IMAGES
+              else f"got {r}, temporary images {len(TEMP_IMAGES)}")
+
+    class Layer(FakeLayer):
+        def __init__(self, visible=True, opacity=100.0, children=None):
+            self.visible, self.opacity, self.children = visible, opacity, children
+
+        def get_visible(self):
+            return self.visible
+
+        def get_opacity(self):
+            return self.opacity
+
+        def is_group(self):
+            return self.children is not None
+
+        def get_children(self):
+            return self.children
+
+    for name, layers in (("no layers", []),
+                         ("only hidden layers", [Layer(visible=False), Layer(visible=False)]),
+                         ("only a 0%-opacity layer", [Layer(opacity=0.0)]),
+                         ("an opaque layer inside a 0%-opacity group", [Layer(opacity=0.0, children=[Layer()])]),
+                         ("an opaque layer inside a hidden group", [Layer(visible=False, children=[Layer()])]),
+                         ("an empty group", [Layer(children=[])])):
+        OPEN_IMAGE.get_layers = lambda layers=layers: layers
+        TEMP_IMAGES.clear()
+        r = plugin._get_current_image_bitmap({})
+        check(f"bitmap preview reports an error for an image with {name}",
+              None if r["status"] == "error" and "No visible layers" in r["error"] and not TEMP_IMAGES
+              else f"got {r}")
+    del OPEN_IMAGE.get_layers
+
+    # _render_visible keeps the component type but always uses the non-linear
+    # (sRGB) variant: GIMP's Precision values are 100 * type + 0 / 50 / 75.
+    for source, expected in ((100, 150), (150, 150), (175, 150), (200, 250), (275, 250),
+                             (350, 350), (500, 550), (600, 650), (675, 650), (700, 750)):
+        PRECISIONS.clear()
+        OPEN_IMAGE.get_precision = lambda source=source: source
+        plugin._render_visible(OPEN_IMAGE, 0, 0, 10, 10).delete()
+        check(f"_render_visible maps precision {source} to {expected}",
+              None if PRECISIONS == [expected] else f"got {PRECISIONS}")
+    del OPEN_IMAGE.get_precision
 
     # _export_to_path must use the GIMP 3 file-*-export procedures, and fail
     # instead of writing PNG data under another format's name (#64, item 5).
