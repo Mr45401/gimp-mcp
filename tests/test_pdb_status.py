@@ -613,6 +613,36 @@ def main():
     DIRECT_OK["value"] = True
     FakePDB.last_error = None
 
+    # Scaling fits the region inside the bounds, keeps its aspect ratio, and
+    # never goes below 1 pixel. The region's own bounds win over the top-level
+    # ones, which scale a region without bounds (get_state_snapshot relies on
+    # that). The temporary image has the region's size.
+    original = FakeImage.get_width, FakeImage.get_height, FakeImage.scale
+    for (w, h), top_bounds, region_bounds, expected in (
+            ((100, 60), None, (50, 50), (50, 30)),
+            ((60, 100), None, (50, 50), (30, 50)),
+            ((1, 100), None, (50, 50), (1, 50)),
+            ((100, 1), None, (50, 50), (50, 1)),
+            ((40, 30), None, (100, 100), (100, 75)),
+            ((40, 20), (20, 20), None, (20, 10)),
+            ((40, 20), (20, 20), (8, 8), (8, 4))):
+        scaled = []
+        params = {"region": {"origin_x": 0, "origin_y": 0, "width": w, "height": h}}
+        if top_bounds:
+            params.update(max_width=top_bounds[0], max_height=top_bounds[1])
+        if region_bounds:
+            params["region"].update(max_width=region_bounds[0], max_height=region_bounds[1])
+        FakeImage.get_width = lambda self, w=w: 100 if self is OPEN_IMAGE else w
+        FakeImage.get_height = lambda self, h=h: 100 if self is OPEN_IMAGE else h
+        FakeImage.scale = lambda self, *size, scaled=scaled: scaled.append(size) or True
+        try:
+            plugin._get_current_image_bitmap(params)
+        finally:
+            FakeImage.get_width, FakeImage.get_height, FakeImage.scale = original
+        check(f"bitmap preview scales a {w}x{h} region with bounds {top_bounds} (top level) and "
+              f"{region_bounds} (region) to {expected[0]}x{expected[1]}",
+              None if scaled == [expected] else f"scaled to {scaled}")
+
     # The bitmap preview rejects bad arguments and images with nothing visible
     # before it creates any temporary image.
     region = {"origin_x": 0, "origin_y": 0, "width": 10, "height": 10}
