@@ -14,15 +14,16 @@ right command when the versions differ.
 ## [Unreleased]
 
 ### Fixed
-- `add_text` and `edit_text` no longer replace an unknown font silently. `add_text` now reports
-  `font` (the applied font), both tools include `requested_font` when it differs from `font`, and
-  both add a `warning` naming the requested and fallback fonts when the font wasn't found (#124).
+- `add_text` no longer replaces an unknown font silently. Its default font is now `Sans-serif`, and
+  its result reports `font` (the applied font), `requested_font` when it differs from `font`, and a
+  `warning` naming both fonts when a default font was substituted (#124).
 - `export_sprite_sheet` works on GIMP 3. It failed every time with
   `ImageBaseType has no attribute 'RGBA'`, and the sheet now keeps its transparent background
   instead of being flattened (#64).
-- `edit_text` can change a text layer's font. Passing `font` always failed on GIMP 3.2. The result
-  now includes the font that was applied, which can be a close match or a default when the name
-  isn't found (#64).
+- `edit_text` can change a text layer's font. Passing `font` always failed on GIMP 3.2. When `font`
+  is given, the result now includes `font` (the applied font), `requested_font` when it differs from
+  `font`, and a `warning` when the requested font wasn't found and a default was substituted
+  (#64, #124).
 - `export_image`, `batch_export`, `export_web_optimized` and `export_icon_sizes` now write real
   JPEG, WebP, TIFF and BMP files. They used GIMP 2 procedure names that GIMP 3 doesn't have, so
   every export silently fell back to PNG data under a `.jpg`, `.webp`, `.tiff` or `.bmp` name,

@@ -3510,53 +3510,64 @@ class MCPPlugin(Gimp.PlugIn):
     # CATEGORY 7 — Text
     # =========================================================================
 
-    def _resolve_font(self, name):
-        """Resolve a font name to (Gimp.Font, substituted), or (None, False).
-
-        Exact and GIMP 2.x alias matches return substituted=False; falling back
-        to a default or the first installed font returns substituted=True.
-        """
-        if not isinstance(name, str):
-            raise TypeError(f"font must be a string, got {type(name).__name__}")
-        if not (hasattr(Gimp, "Font") and hasattr(Gimp.Font, "get_by_name")):
-            return None, False
-
-        if name and name.strip():
-            font_obj = Gimp.Font.get_by_name(name)
-            if font_obj is not None:
-                return font_obj, False
-
-            # GIMP 3.2 dropped GIMP 2.x aliases; e.g. "Sans" no longer resolves,
-            # the 3.2 equivalent is "Sans-serif".
-            for alias in (name + "-serif", name + " Regular",
-                          name.replace(" ", "-")):
-                if alias == name:
-                    continue
-                font_obj = Gimp.Font.get_by_name(alias)
-                if font_obj is not None:
-                    return font_obj, False
-
+    def _default_font(self):
+        """Return the first available default or installed Gimp.Font, or None."""
         for fallback in ("Sans-serif", "Serif", "Monospace"):
             font_obj = Gimp.Font.get_by_name(fallback)
             if font_obj is not None:
-                return font_obj, True
+                return font_obj
 
         raw = Gimp.fonts_get_list("")
         if isinstance(raw, tuple):
             flist = list(raw[1]) if len(raw) > 1 else []
         else:
             flist = list(raw)
-        return (flist[0], True) if flist else (None, False)
+        return flist[0] if flist else None
+
+    def _resolve_font(self, name):
+        """Resolve a font name to (Gimp.Font, substituted), or (None, False).
+
+        Surrounding whitespace is stripped, and an empty name selects the
+        default font without reporting a substitution. Exact and GIMP 2.x alias
+        matches return substituted=False; falling back to a default or the first
+        installed font for an unknown name returns substituted=True.
+        """
+        if not isinstance(name, str):
+            raise TypeError(f"font must be a string, got {type(name).__name__}")
+        if not (hasattr(Gimp, "Font") and hasattr(Gimp.Font, "get_by_name")):
+            return None, False
+
+        name = name.strip()
+        if not name:
+            return self._default_font(), False
+
+        font_obj = Gimp.Font.get_by_name(name)
+        if font_obj is not None:
+            return font_obj, False
+
+        # GIMP 3.2 dropped GIMP 2.x aliases; e.g. "Sans" no longer resolves,
+        # the 3.2 equivalent is "Sans-serif".
+        for alias in (name + "-serif", name + " Regular",
+                      name.replace(" ", "-")):
+            if alias == name:
+                continue
+            font_obj = Gimp.Font.get_by_name(alias)
+            if font_obj is not None:
+                return font_obj, False
+
+        font_obj = self._default_font()
+        return (font_obj, True) if font_obj is not None else (None, False)
 
     def _font_result_fields(self, requested, font_obj, substituted):
         """Build the font result fields for add_text and edit_text."""
         applied = font_obj.get_name()
         fields = {"font": applied}
-        if requested != applied:
-            fields["requested_font"] = requested
+        clean_requested = requested.strip()
+        if clean_requested and clean_requested != applied:
+            fields["requested_font"] = clean_requested
         if substituted:
             fields["warning"] = (
-                f"Font {requested!r} not found; used {applied!r}. "
+                f"Font {clean_requested!r} not found; used {applied!r}. "
                 "See list_fonts for installed fonts."
             )
         return fields
@@ -3632,7 +3643,7 @@ class MCPPlugin(Gimp.PlugIn):
             y           = int(params.get("y", 0))
             font        = params.get("font")
             if font is None:
-                font = "Sans"
+                font = "Sans-serif"
             size        = int(params.get("size", 24))
             color_str   = params.get("color", "black")
 

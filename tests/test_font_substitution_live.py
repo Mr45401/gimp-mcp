@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Live regression test for issue #124: add_text and edit_text font reporting.
 
-Checks three font lookup outcomes against a running GIMP 3.2 MCP server for
-both add_text and edit_text:
-1. An exact installed font name: reports `font` only (no `requested_font`, no
+Checks font lookup outcomes against a running GIMP 3.2 MCP server for both
+add_text and edit_text:
+1. Default / empty / whitespace-padded font names: `add_text` without `font`
+   uses the default ("Sans-serif") without `requested_font` or `warning`,
+   trailing whitespace is stripped, and `""` selects the default font without a
+   warning.
+2. An exact installed font name: reports `font` only (no `requested_font`, no
    `warning`) and applies that font to the text layer.
-2. A GIMP 2.x / style alias (e.g. "Sans" -> "Sans-serif"): reports `font` and
+3. A GIMP 2.x / style alias (e.g. "Sans" -> "Sans-serif"): reports `font` and
    `requested_font`, without `warning`, and applies the resolved font.
-3. An unknown font name ("Comic Snas"): reports `font`, `requested_font`, and a
+4. An unknown font name ("Comic Snas"): reports `font`, `requested_font`, and a
    `warning` naming both fonts and pointing to `list_fonts`, and applies the
    fallback font.
 Also checks that edit_text without `font` omits all font fields.
@@ -95,37 +99,47 @@ def discover_font_cases():
         "if Gimp.Font.get_by_name('Sans') is None and Gimp.Font.get_by_name('Sans-serif') is not None:\n"
         "    _t124_alias = ['Sans', Gimp.Font.get_by_name('Sans-serif').get_name()]\n"
         "else:\n"
-        "    for _n in _t124_names:\n"
-        "        for _cand in (\n"
-        "            _n[:-6] if _n.endswith('-serif') else None,\n"
-        "            _n[:-8] if _n.endswith(' Regular') else None,\n"
-        "            _n.replace('-', ' ') if '-' in _n else None,\n"
+        "    for _t124_n in _t124_names:\n"
+        "        for _t124_cand in (\n"
+        "            _t124_n[:-6] if _t124_n.endswith('-serif') else None,\n"
+        "            _t124_n[:-8] if _t124_n.endswith(' Regular') else None,\n"
+        "            _t124_n.replace('-', ' ') if '-' in _t124_n else None,\n"
         "        ):\n"
-        "            if _cand and Gimp.Font.get_by_name(_cand) is None:\n"
-        "                for _a in (_cand + '-serif', _cand + ' Regular', _cand.replace(' ', '-')):\n"
-        "                    _hit = Gimp.Font.get_by_name(_a)\n"
-        "                    if _hit is not None:\n"
-        "                        _t124_alias = [_cand, _hit.get_name()]\n"
+        "            if _t124_cand and Gimp.Font.get_by_name(_t124_cand) is None:\n"
+        "                for _t124_a in (\n"
+        "                    _t124_cand + '-serif',\n"
+        "                    _t124_cand + ' Regular',\n"
+        "                    _t124_cand.replace(' ', '-'),\n"
+        "                ):\n"
+        "                    _t124_hit = Gimp.Font.get_by_name(_t124_a)\n"
+        "                    if _t124_hit is not None:\n"
+        "                        _t124_alias = [_t124_cand, _t124_hit.get_name()]\n"
         "                        break\n"
         "                if _t124_alias:\n"
         "                    break\n"
         "        if _t124_alias:\n"
         "            break\n"
         "_t124_fb = None\n"
-        "for _f in ('Sans-serif', 'Serif', 'Monospace'):\n"
-        "    _o = Gimp.Font.get_by_name(_f)\n"
-        "    if _o is not None:\n"
-        "        _t124_fb = _o.get_name()\n"
+        "for _t124_f in ('Sans-serif', 'Serif', 'Monospace'):\n"
+        "    _t124_o = Gimp.Font.get_by_name(_t124_f)\n"
+        "    if _t124_o is not None:\n"
+        "        _t124_fb = _t124_o.get_name()\n"
         "        break\n"
         "if _t124_fb is None and _t124_names:\n"
         "    _t124_fb = _t124_names[0]\n"
         f"_t124_u = {UNKNOWN_FONT!r}\n"
         "_t124_unknown_matches = any(\n"
-        "    Gimp.Font.get_by_name(_q) is not None\n"
-        "    for _q in (_t124_u, _t124_u + '-serif', _t124_u + ' Regular', _t124_u.replace(' ', '-'))\n"
+        "    Gimp.Font.get_by_name(_t124_q) is not None\n"
+        "    for _t124_q in (\n"
+        "        _t124_u,\n"
+        "        _t124_u + '-serif',\n"
+        "        _t124_u + ' Regular',\n"
+        "        _t124_u.replace(' ', '-'),\n"
+        "    )\n"
         ")\n"
         "print(json.dumps({'exact': _t124_exact, 'alias': _t124_alias, "
-        "'fallback': _t124_fb, 'unknown_matches': _t124_unknown_matches}))"
+        "'fallback': _t124_fb, 'unknown_matches': _t124_unknown_matches, "
+        "'has_sans_serif': Gimp.Font.get_by_name('Sans-serif') is not None}))"
     )
     info = json.loads(out)
     if not info["exact"]:
@@ -134,7 +148,7 @@ def discover_font_cases():
         fail("could not find an uninstalled alias for any installed GIMP font")
     if info["unknown_matches"]:
         fail(f"expected {UNKNOWN_FONT!r} (and its aliases) not to be installed in GIMP")
-    return info["exact"], tuple(info["alias"]), info["fallback"]
+    return info["exact"], tuple(info["alias"]), info["fallback"], info["has_sans_serif"]
 
 
 def assert_exact(tool, res, layer_name, exact_font):
@@ -182,39 +196,62 @@ def assert_substituted(tool, res, layer_name, requested, expected_fallback):
 def main():
     connected = False
     try:
-        exact_font, (alias_name, alias_target), expected_fallback = discover_font_cases()
+        (
+            exact_font,
+            (alias_name, alias_target),
+            expected_fallback,
+            has_sans_serif,
+        ) = discover_font_cases()
         connected = True
         py(
             "from gi.repository import Gimp",
-            "_t124_img = Gimp.Image.new(240, 100, Gimp.ImageBaseType.RGB)",
-            "_t124_bg = Gimp.Layer.new(_t124_img, 'bg', 240, 100, "
+            "_t124_img = Gimp.Image.new(240, 120, Gimp.ImageBaseType.RGB)",
+            "_t124_bg = Gimp.Layer.new(_t124_img, 'bg', 240, 120, "
             "Gimp.ImageType.RGB_IMAGE, 100, Gimp.LayerMode.NORMAL)",
             "_t124_img.insert_layer(_t124_bg, None, 0)",
         )
 
-        # add_text: exact, alias, unknown
+        # add_text: default (font omitted), exact, trailing whitespace, alias, unknown
+        r = cmd("add_text", {"image_index": image_index(), "text": "Default",
+                             "x": 5, "y": 5, "size": 20, "color": "black"})
+        if r.get("status") != "success":
+            fail(f"add_text default failed: {r}")
+        if has_sans_serif:
+            assert_exact("add_text (default)", r["results"], r["results"]["layer_name"],
+                         expected_fallback)
+        else:
+            assert_substituted("add_text (default)", r["results"], r["results"]["layer_name"],
+                               "Sans-serif", expected_fallback)
+
         r = cmd("add_text", {"image_index": image_index(), "text": "Exact",
-                             "x": 5, "y": 5, "font": exact_font, "size": 20, "color": "black"})
+                             "x": 5, "y": 25, "font": exact_font, "size": 20, "color": "black"})
         if r.get("status") != "success":
             fail(f"add_text exact failed: {r}")
         exact_layer = r["results"]["layer_name"]
         assert_exact("add_text", r["results"], exact_layer, exact_font)
 
+        r = cmd("add_text", {"image_index": image_index(), "text": "Trimmed",
+                             "x": 5, "y": 45, "font": exact_font + " ", "size": 20,
+                             "color": "black"})
+        if r.get("status") != "success":
+            fail(f"add_text trailing-space failed: {r}")
+        assert_exact("add_text (trimmed)", r["results"], r["results"]["layer_name"], exact_font)
+
         r = cmd("add_text", {"image_index": image_index(), "text": "Alias",
-                             "x": 5, "y": 30, "font": alias_name, "size": 20, "color": "black"})
+                             "x": 5, "y": 65, "font": alias_name, "size": 20, "color": "black"})
         if r.get("status") != "success":
             fail(f"add_text alias failed: {r}")
         assert_alias("add_text", r["results"], r["results"]["layer_name"],
                      alias_name, alias_target)
 
         r = cmd("add_text", {"image_index": image_index(), "text": "Unknown",
-                             "x": 5, "y": 55, "font": UNKNOWN_FONT, "size": 20, "color": "black"})
+                             "x": 5, "y": 85, "font": UNKNOWN_FONT, "size": 20, "color": "black"})
         if r.get("status") != "success":
             fail(f"add_text unknown failed: {r}")
         assert_substituted("add_text", r["results"], r["results"]["layer_name"],
                            UNKNOWN_FONT, expected_fallback)
 
-        # edit_text: alias, exact, unknown (from exact so the layer changes font), and no-font
+        # edit_text: alias, exact (with trailing space), empty string, unknown, and no-font
         r = cmd("edit_text", {"image_index": image_index(), "layer_name": exact_layer,
                               "font": alias_name})
         if r.get("status") != "success":
@@ -222,10 +259,21 @@ def main():
         assert_alias("edit_text", r["results"], exact_layer, alias_name, alias_target)
 
         r = cmd("edit_text", {"image_index": image_index(), "layer_name": exact_layer,
-                              "font": exact_font})
+                              "font": exact_font + " "})
         if r.get("status") != "success":
             fail(f"edit_text exact failed: {r}")
         assert_exact("edit_text", r["results"], exact_layer, exact_font)
+
+        r = cmd("edit_text", {"image_index": image_index(), "layer_name": exact_layer,
+                              "font": ""})
+        if r.get("status") != "success":
+            fail(f"edit_text empty font failed: {r}")
+        assert_exact("edit_text (empty)", r["results"], exact_layer, expected_fallback)
+
+        r = cmd("edit_text", {"image_index": image_index(), "layer_name": exact_layer,
+                              "font": exact_font})
+        if r.get("status") != "success":
+            fail(f"edit_text reset exact failed: {r}")
 
         r = cmd("edit_text", {"image_index": image_index(), "layer_name": exact_layer,
                               "font": UNKNOWN_FONT})

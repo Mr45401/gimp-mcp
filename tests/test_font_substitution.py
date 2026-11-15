@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Tests for font resolution and substitution reporting in add_text / edit_text (#124).
 
-- _resolve_font treats exact and GIMP 2.x alias matches as matches
-  (substituted=False) and step-3 fallbacks ("Sans-serif", "Serif",
+- _resolve_font strips surrounding whitespace, treats empty names as the default
+  font without warning, treats exact and GIMP 2.x alias matches as matches
+  (substituted=False), and treats step-3 fallbacks ("Sans-serif", "Serif",
   "Monospace", or the first installed font) as substitutions (substituted=True).
+- add_text defaults to "Sans-serif" (so omitting `font` returns `font` only,
+  without `requested_font` or `warning`).
 - add_text and edit_text report the applied font in `font`, include
-  `requested_font` when it differs from `font`, and add `warning` only when
-  step 3 substituted a fallback font.
+  `requested_font` when the stripped non-empty request differs from `font`, and
+  add `warning` only when step 3 substituted a fallback font.
 - edit_text omits font fields when `font` was not passed.
 - Tool descriptions in gimp_mcp_server.py document unknown-font fallback and
   point to list_fonts.
@@ -15,7 +18,9 @@ No GIMP needed: stubs gi.repository.
 Run with: uv run tests/test_font_substitution.py
 Exits 0 on pass, 1 on fail.
 """
+import contextlib
 import importlib.util
+import inspect
 import os
 import sys
 import types
@@ -25,6 +30,8 @@ ROOT = os.path.join(HERE, os.pardir)
 PLUGIN = os.path.join(ROOT, "gimp-mcp-plugin.py")
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+
+_MISSING = object()
 
 
 class FakeFont:
@@ -250,6 +257,21 @@ def install_gi_stub():
     sys.modules["gi.repository"] = repository
 
 
+@contextlib.contextmanager
+def stubbed_gi():
+    saved_gi = sys.modules.get("gi", _MISSING)
+    saved_repo = sys.modules.get("gi.repository", _MISSING)
+    install_gi_stub()
+    try:
+        yield
+    finally:
+        for key, prev in (("gi", saved_gi), ("gi.repository", saved_repo)):
+            if prev is _MISSING:
+                sys.modules.pop(key, None)
+            else:
+                sys.modules[key] = prev
+
+
 def load_plugin():
     spec = importlib.util.spec_from_file_location("gimp_mcp_plugin_font_test", PLUGIN)
     mod = importlib.util.module_from_spec(spec)
@@ -284,11 +306,6 @@ def reset_scene(*font_names, native_ok=True):
 
 def main():
     global FONTS_LIST_RAW
-    install_gi_stub()
-    mod = load_plugin()
-    plugin = mod.MCPPlugin()
-    import gimp_mcp_server as server
-
     failures = []
 
     def check(name, condition, detail=""):
@@ -298,206 +315,280 @@ def main():
         if not condition:
             failures.append(name)
 
-    # ── 1. _resolve_font ──────────────────────────────────────────────────────
-    set_fonts("Sans-serif", "Serif", "Monospace", "DejaVu Sans Regular")
+    with stubbed_gi():
+        mod = load_plugin()
+        plugin = mod.MCPPlugin()
+        import gimp_mcp_server as server
 
-    f, sub = plugin._resolve_font("Serif")
-    check("_resolve_font exact match returns substituted=False",
-          f is not None and f.get_name() == "Serif" and sub is False, f"{f}, {sub}")
+        # ── 1. _resolve_font ──────────────────────────────────────────────────
+        set_fonts("Sans-serif", "Serif", "Monospace", "DejaVu Sans Regular")
 
-    f, sub = plugin._resolve_font("Sans")
-    check("_resolve_font 'Sans' -> 'Sans-serif' alias returns substituted=False",
-          f is not None and f.get_name() == "Sans-serif" and sub is False, f"{f}, {sub}")
+        f, sub = plugin._resolve_font("Serif")
+        check("_resolve_font exact match returns substituted=False",
+              f is not None and f.get_name() == "Serif" and sub is False, f"{f}, {sub}")
 
-    f, sub = plugin._resolve_font("DejaVu Sans")
-    check("_resolve_font '<name> Regular' alias returns substituted=False",
-          f is not None and f.get_name() == "DejaVu Sans Regular" and sub is False, f"{f}, {sub}")
+        f, sub = plugin._resolve_font("  Serif \t")
+        check("_resolve_font strips surrounding whitespace before lookup",
+              f is not None and f.get_name() == "Serif" and sub is False, f"{f}, {sub}")
 
-    f, sub = plugin._resolve_font("Sans serif")
-    check("_resolve_font space-to-hyphen alias returns substituted=False",
-          f is not None and f.get_name() == "Sans-serif" and sub is False, f"{f}, {sub}")
+        f, sub = plugin._resolve_font("Sans")
+        check("_resolve_font 'Sans' -> 'Sans-serif' alias returns substituted=False",
+              f is not None and f.get_name() == "Sans-serif" and sub is False, f"{f}, {sub}")
 
-    f, sub = plugin._resolve_font("Comic Snas")
-    check("_resolve_font unknown name falls back to 'Sans-serif' with substituted=True",
-          f is not None and f.get_name() == "Sans-serif" and sub is True, f"{f}, {sub}")
+        f, sub = plugin._resolve_font("DejaVu Sans")
+        check("_resolve_font '<name> Regular' alias returns substituted=False",
+              f is not None and f.get_name() == "DejaVu Sans Regular" and sub is False,
+              f"{f}, {sub}")
 
-    f, sub = plugin._resolve_font("")
-    check("_resolve_font empty name uses step-3 fallback with substituted=True",
-          f is not None and f.get_name() == "Sans-serif" and sub is True, f"{f}, {sub}")
+        f, sub = plugin._resolve_font("Sans serif")
+        check("_resolve_font space-to-hyphen alias returns substituted=False",
+              f is not None and f.get_name() == "Sans-serif" and sub is False, f"{f}, {sub}")
 
-    set_fonts("Monospace")
-    f, sub = plugin._resolve_font("Comic Snas")
-    check("_resolve_font falls through to 'Monospace' with substituted=True",
-          f is not None and f.get_name() == "Monospace" and sub is True, f"{f}, {sub}")
+        f, sub = plugin._resolve_font("Comic Snas")
+        check("_resolve_font unknown name falls back to 'Sans-serif' with substituted=True",
+              f is not None and f.get_name() == "Sans-serif" and sub is True, f"{f}, {sub}")
 
-    set_fonts("Cantarell")
-    f, sub = plugin._resolve_font("Comic Snas")
-    check("_resolve_font falls back to first installed font (list) with substituted=True",
-          f is not None and f.get_name() == "Cantarell" and sub is True, f"{f}, {sub}")
+        for blank in ("", "   "):
+            f, sub = plugin._resolve_font(blank)
+            check(f"_resolve_font {blank!r} selects default font with substituted=False",
+                  f is not None and f.get_name() == "Sans-serif" and sub is False, f"{f}, {sub}")
 
-    set_fonts()
-    FONTS_LIST_RAW = (1, [FakeFont("TupleFont")])
-    f, sub = plugin._resolve_font("Comic Snas")
-    check("_resolve_font handles GIMP (count, fonts) tuple return with substituted=True",
-          f is not None and f.get_name() == "TupleFont" and sub is True, f"{f}, {sub}")
+        set_fonts("Monospace")
+        f, sub = plugin._resolve_font("Comic Snas")
+        check("_resolve_font falls through to 'Monospace' with substituted=True",
+              f is not None and f.get_name() == "Monospace" and sub is True, f"{f}, {sub}")
 
-    set_fonts()
-    FONTS_LIST_RAW = (0, [])
-    f, sub = plugin._resolve_font("Comic Snas")
-    check("_resolve_font returns (None, False) when no fonts exist",
-          f is None and sub is False, f"{f}, {sub}")
+        set_fonts("Cantarell")
+        f, sub = plugin._resolve_font("Comic Snas")
+        check("_resolve_font falls back to first installed font (list) with substituted=True",
+              f is not None and f.get_name() == "Cantarell" and sub is True, f"{f}, {sub}")
 
-    # ── 2. _add_text ──────────────────────────────────────────────────────────
-    reset_scene("Sans-serif", "Serif", "Monospace")
+        f, sub = plugin._resolve_font("")
+        check("_resolve_font empty name uses first installed font with substituted=False",
+              f is not None and f.get_name() == "Cantarell" and sub is False, f"{f}, {sub}")
 
-    r = plugin._add_text({"text": "Exact", "font": "Serif", "x": 12, "y": 34})
-    res = r.get("results", {})
-    check("add_text exact match reports font without requested_font or warning",
-          r["status"] == "success"
-          and res.get("font") == "Serif"
-          and "requested_font" not in res
-          and "warning" not in res
-          and OPEN_IMAGE.layers[0].get_font().get_name() == "Serif",
-          str(r))
+        set_fonts()
+        FONTS_LIST_RAW = (1, [FakeFont("TupleFont")])
+        f, sub = plugin._resolve_font("Comic Snas")
+        check("_resolve_font handles GIMP (count, fonts) tuple return with substituted=True",
+              f is not None and f.get_name() == "TupleFont" and sub is True, f"{f}, {sub}")
 
-    r = plugin._add_text({"text": "Default alias"})
-    res = r.get("results", {})
-    check("add_text default 'Sans' reports font='Sans-serif', requested_font='Sans', no warning",
-          r["status"] == "success"
-          and res.get("font") == "Sans-serif"
-          and res.get("requested_font") == "Sans"
-          and "warning" not in res,
-          str(r))
+        set_fonts()
+        FONTS_LIST_RAW = (0, [])
+        f, sub = plugin._resolve_font("Comic Snas")
+        check("_resolve_font returns (None, False) when no fonts exist",
+              f is None and sub is False, f"{f}, {sub}")
 
-    r = plugin._add_text({"text": "None font", "font": None})
-    res = r.get("results", {})
-    check("add_text font=None uses default 'Sans' alias without warning",
-          r["status"] == "success"
-          and res.get("font") == "Sans-serif"
-          and res.get("requested_font") == "Sans"
-          and "warning" not in res,
-          str(r))
+        f, sub = plugin._resolve_font("")
+        check("_resolve_font empty name returns (None, False) when no fonts exist",
+              f is None and sub is False, f"{f}, {sub}")
 
-    r = plugin._add_text({"text": "Typo", "font": "Comic Snas"})
-    res = r.get("results", {})
-    expected_warning = (
-        "Font 'Comic Snas' not found; used 'Sans-serif'. See list_fonts for installed fonts."
-    )
-    check("add_text unknown font reports font, requested_font and warning",
-          r["status"] == "success"
-          and res.get("font") == "Sans-serif"
-          and res.get("requested_font") == "Comic Snas"
-          and res.get("warning") == expected_warning,
-          str(r))
+        # ── 2. _add_text ──────────────────────────────────────────────────────
+        reset_scene("Sans-serif", "Serif", "Monospace")
 
-    # PDB fallback path in _add_text
-    reset_scene("Sans-serif", "Serif", native_ok=False)
-    r = plugin._add_text({"text": "PDB fallback", "font": "Comic Snas"})
-    res = r.get("results", {})
-    check("add_text via gimp-text-font PDB fallback still reports substitution warning",
-          r["status"] == "success"
-          and res.get("font") == "Sans-serif"
-          and res.get("requested_font") == "Comic Snas"
-          and res.get("warning") == expected_warning,
-          str(r))
+        r = plugin._add_text({"text": "Default"})
+        res = r.get("results", {})
+        check("add_text omitted font defaults to 'Sans-serif' without requested_font or warning",
+              r["status"] == "success"
+              and res.get("font") == "Sans-serif"
+              and "requested_font" not in res
+              and "warning" not in res
+              and OPEN_IMAGE.layers[0].get_font().get_name() == "Sans-serif",
+              str(r))
 
-    # No fonts at all in _add_text
-    reset_scene()
-    r = plugin._add_text({"text": "No fonts", "font": "Comic Snas"})
-    check("add_text returns an error without opening an undo group when GIMP has no fonts",
-          r["status"] == "error"
-          and "Comic Snas" in r.get("error", "")
-          and OPEN_IMAGE.undo_depth == 0
-          and not OPEN_IMAGE.layers,
-          str(r))
+        for blank in (None, "", "   "):
+            r = plugin._add_text({"text": "Blank", "font": blank})
+            res = r.get("results", {})
+            check(f"add_text font={blank!r} uses default 'Sans-serif' without warning",
+                  r["status"] == "success"
+                  and res.get("font") == "Sans-serif"
+                  and "requested_font" not in res
+                  and "warning" not in res,
+                  str(r))
 
-    # Non-string font in _add_text
-    reset_scene("Sans-serif")
-    r = plugin._add_text({"text": "Bad font type", "font": 123})
-    check("add_text rejects non-string font",
-          r["status"] == "error" and "string" in r.get("error", ""), str(r))
+        r = plugin._add_text({"text": "Exact", "font": "Serif", "x": 12, "y": 34})
+        res = r.get("results", {})
+        check("add_text exact match reports font without requested_font or warning",
+              r["status"] == "success"
+              and res.get("font") == "Serif"
+              and "requested_font" not in res
+              and "warning" not in res
+              and OPEN_IMAGE.layers[0].get_font().get_name() == "Serif",
+              str(r))
 
-    # ── 3. _edit_text ─────────────────────────────────────────────────────────
-    reset_scene("Sans-serif", "Serif", "Monospace")
-    seed = plugin._add_text({"text": "Seed", "font": "Sans-serif"})
-    layer_name = seed["results"]["layer_name"]
-    layer_obj = OPEN_IMAGE.layers[0]
+        r = plugin._add_text({"text": "Trimmed exact", "font": "Serif "})
+        res = r.get("results", {})
+        check("add_text 'Serif ' matches 'Serif' without requested_font or warning",
+              r["status"] == "success"
+              and res.get("font") == "Serif"
+              and "requested_font" not in res
+              and "warning" not in res,
+              str(r))
 
-    r = plugin._edit_text({"layer_name": layer_name, "font": "Serif"})
-    res = r.get("results", {})
-    check("edit_text exact match reports font='Serif' without requested_font or warning",
-          r["status"] == "success"
-          and res == {"status": "success", "font": "Serif"}
-          and layer_obj.get_font().get_name() == "Serif",
-          str(r))
+        r = plugin._add_text({"text": "Explicit alias", "font": "Sans"})
+        res = r.get("results", {})
+        check("add_text explicit 'Sans' reports font='Sans-serif', requested_font='Sans', no warning",
+              r["status"] == "success"
+              and res.get("font") == "Sans-serif"
+              and res.get("requested_font") == "Sans"
+              and "warning" not in res,
+              str(r))
 
-    r = plugin._edit_text({"layer_name": layer_name, "font": "Sans"})
-    res = r.get("results", {})
-    check("edit_text alias 'Sans' reports font='Sans-serif', requested_font='Sans', no warning",
-          r["status"] == "success"
-          and res == {"status": "success", "font": "Sans-serif", "requested_font": "Sans"}
-          and layer_obj.get_font().get_name() == "Sans-serif",
-          str(r))
+        r = plugin._add_text({"text": "Typo", "font": "Comic Snas"})
+        res = r.get("results", {})
+        expected_warning = (
+            "Font 'Comic Snas' not found; used 'Sans-serif'. See list_fonts for installed fonts."
+        )
+        check("add_text unknown font reports font, requested_font and warning",
+              r["status"] == "success"
+              and res.get("font") == "Sans-serif"
+              and res.get("requested_font") == "Comic Snas"
+              and res.get("warning") == expected_warning,
+              str(r))
 
-    r = plugin._edit_text({"layer_name": layer_name, "font": "Comic Snas"})
-    res = r.get("results", {})
-    check("edit_text unknown font reports font, requested_font and warning",
-          r["status"] == "success"
-          and res == {
-              "status": "success",
-              "font": "Sans-serif",
-              "requested_font": "Comic Snas",
-              "warning": expected_warning,
-          }
-          and layer_obj.get_font().get_name() == "Sans-serif",
-          str(r))
+        r = plugin._add_text({"text": "Trimmed typo", "font": "  Comic Snas  "})
+        res = r.get("results", {})
+        check("add_text trims whitespace in requested_font and warning on unknown font",
+              r["status"] == "success"
+              and res.get("requested_font") == "Comic Snas"
+              and res.get("warning") == expected_warning,
+              str(r))
 
-    r = plugin._edit_text({"layer_name": layer_name, "text": "Renamed only"})
-    res = r.get("results", {})
-    check("edit_text without font omits font, requested_font and warning",
-          r["status"] == "success" and res == {"status": "success"},
-          str(r))
+        # PDB fallback path in _add_text
+        reset_scene("Sans-serif", "Serif", native_ok=False)
+        r = plugin._add_text({"text": "PDB fallback", "font": "Comic Snas"})
+        res = r.get("results", {})
+        check("add_text via gimp-text-font PDB fallback still reports substitution warning",
+              r["status"] == "success"
+              and res.get("font") == "Sans-serif"
+              and res.get("requested_font") == "Comic Snas"
+              and res.get("warning") == expected_warning,
+              str(r))
 
-    set_fonts()
-    r = plugin._edit_text({"layer_name": layer_name, "font": "Comic Snas"})
-    check("edit_text returns error when GIMP has no fonts",
-          r["status"] == "error" and "Comic Snas" in r.get("error", ""), str(r))
+        # No fonts at all in _add_text
+        reset_scene()
+        r = plugin._add_text({"text": "No fonts", "font": "Comic Snas"})
+        check("add_text returns an error without opening an undo group when GIMP has no fonts",
+              r["status"] == "error"
+              and "Comic Snas" in r.get("error", "")
+              and OPEN_IMAGE.undo_depth == 0
+              and not OPEN_IMAGE.layers,
+              str(r))
 
-    # ── 4. gimp_mcp_server wrappers & tool descriptions ───────────────────────
-    reset_scene("Sans-serif", "Serif")
-    real_get_conn = server.get_gimp_connection
+        # Non-string font in _add_text
+        reset_scene("Sans-serif")
+        r = plugin._add_text({"text": "Bad font type", "font": 123})
+        check("add_text rejects non-string font",
+              r["status"] == "error" and "string" in r.get("error", ""), str(r))
 
-    class DirectConn:
-        def send_command(self, command_type, params=None):
-            if command_type == "add_text":
-                return plugin._add_text(params or {})
-            if command_type == "edit_text":
-                return plugin._edit_text(params or {})
-            raise AssertionError(f"unexpected command: {command_type}")
+        # ── 3. _edit_text ─────────────────────────────────────────────────────
+        reset_scene("Sans-serif", "Serif", "Monospace")
+        seed = plugin._add_text({"text": "Seed", "font": "Sans-serif"})
+        layer_name = seed["results"]["layer_name"]
+        layer_obj = OPEN_IMAGE.layers[0]
 
-    server.get_gimp_connection = DirectConn
-    try:
-        added = server.add_text(None, text="Via server", font="Comic Snas")
-        check("server.add_text forwards font, requested_font and warning",
-              added.get("font") == "Sans-serif"
-              and added.get("requested_font") == "Comic Snas"
-              and added.get("warning") == expected_warning,
-              str(added))
+        r = plugin._edit_text({"layer_name": layer_name, "font": "Serif"})
+        res = r.get("results", {})
+        check("edit_text exact match reports font='Serif' without requested_font or warning",
+              r["status"] == "success"
+              and res == {"status": "success", "font": "Serif"}
+              and layer_obj.get_font().get_name() == "Serif",
+              str(r))
 
-        edited = server.edit_text(None, layer_name=added["layer_name"], font="Comic Snas")
-        check("server.edit_text forwards font, requested_font and warning",
-              edited.get("font") == "Sans-serif"
-              and edited.get("requested_font") == "Comic Snas"
-              and edited.get("warning") == expected_warning,
-              str(edited))
-    finally:
-        server.get_gimp_connection = real_get_conn
+        r = plugin._edit_text({"layer_name": layer_name, "font": "Serif "})
+        res = r.get("results", {})
+        check("edit_text 'Serif ' matches 'Serif' without requested_font or warning",
+              r["status"] == "success"
+              and res == {"status": "success", "font": "Serif"}
+              and layer_obj.get_font().get_name() == "Serif",
+              str(r))
 
-    for tool_name in ("add_text", "edit_text"):
-        desc = server.mcp._tool_manager.get_tool(tool_name).description or ""
-        check(f"{tool_name} MCP description mentions list_fonts and warning",
-              "list_fonts" in desc and "warning" in desc and "requested_font" in desc,
-              desc)
+        r = plugin._edit_text({"layer_name": layer_name, "font": ""})
+        res = r.get("results", {})
+        check("edit_text empty font selects default 'Sans-serif' without requested_font or warning",
+              r["status"] == "success"
+              and res == {"status": "success", "font": "Sans-serif"}
+              and layer_obj.get_font().get_name() == "Sans-serif",
+              str(r))
+
+        r = plugin._edit_text({"layer_name": layer_name, "font": "Sans"})
+        res = r.get("results", {})
+        check("edit_text alias 'Sans' reports font='Sans-serif', requested_font='Sans', no warning",
+              r["status"] == "success"
+              and res == {"status": "success", "font": "Sans-serif", "requested_font": "Sans"}
+              and layer_obj.get_font().get_name() == "Sans-serif",
+              str(r))
+
+        r = plugin._edit_text({"layer_name": layer_name, "font": "Comic Snas"})
+        res = r.get("results", {})
+        check("edit_text unknown font reports font, requested_font and warning",
+              r["status"] == "success"
+              and res == {
+                  "status": "success",
+                  "font": "Sans-serif",
+                  "requested_font": "Comic Snas",
+                  "warning": expected_warning,
+              }
+              and layer_obj.get_font().get_name() == "Sans-serif",
+              str(r))
+
+        r = plugin._edit_text({"layer_name": layer_name, "text": "Renamed only"})
+        res = r.get("results", {})
+        check("edit_text without font omits font, requested_font and warning",
+              r["status"] == "success" and res == {"status": "success"},
+              str(r))
+
+        set_fonts()
+        r = plugin._edit_text({"layer_name": layer_name, "font": "Comic Snas"})
+        check("edit_text returns error when GIMP has no fonts",
+              r["status"] == "error" and "Comic Snas" in r.get("error", ""), str(r))
+
+        # ── 4. gimp_mcp_server wrappers & tool descriptions ───────────────────
+        reset_scene("Sans-serif", "Serif")
+        sig_default = inspect.signature(server.add_text).parameters["font"].default
+        check("server.add_text default font parameter is 'Sans-serif'",
+              sig_default == "Sans-serif", repr(sig_default))
+
+        real_get_conn = server.get_gimp_connection
+
+        class DirectConn:
+            def send_command(self, command_type, params=None):
+                if command_type == "add_text":
+                    return plugin._add_text(params or {})
+                if command_type == "edit_text":
+                    return plugin._edit_text(params or {})
+                raise AssertionError(f"unexpected command: {command_type}")
+
+        server.get_gimp_connection = DirectConn
+        try:
+            default_added = server.add_text(None, text="Default via server")
+            check("server.add_text with default font omits requested_font and warning",
+                  default_added.get("font") == "Sans-serif"
+                  and "requested_font" not in default_added
+                  and "warning" not in default_added,
+                  str(default_added))
+
+            added = server.add_text(None, text="Via server", font="Comic Snas")
+            check("server.add_text forwards font, requested_font and warning",
+                  added.get("font") == "Sans-serif"
+                  and added.get("requested_font") == "Comic Snas"
+                  and added.get("warning") == expected_warning,
+                  str(added))
+
+            edited = server.edit_text(None, layer_name=added["layer_name"], font="Comic Snas")
+            check("server.edit_text forwards font, requested_font and warning",
+                  edited.get("font") == "Sans-serif"
+                  and edited.get("requested_font") == "Comic Snas"
+                  and edited.get("warning") == expected_warning,
+                  str(edited))
+        finally:
+            server.get_gimp_connection = real_get_conn
+
+        for tool_name in ("add_text", "edit_text"):
+            desc = server.mcp._tool_manager.get_tool(tool_name).description or ""
+            check(f"{tool_name} MCP description mentions list_fonts and warning",
+                  "list_fonts" in desc and "warning" in desc and "requested_font" in desc,
+                  desc)
 
     print(f"\n{'FAILED' if failures else 'PASSED'}: {len(failures)} failure(s)")
     return 1 if failures else 0

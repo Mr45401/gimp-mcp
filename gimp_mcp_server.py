@@ -2227,7 +2227,7 @@ def add_text(
     text: str,
     x: int = 0,
     y: int = 0,
-    font: str = "Sans",
+    font: str = "Sans-serif",
     size: int = 24,
     color: str = "black",
     image_index: int = 0
@@ -2237,9 +2237,9 @@ def add_text(
     Parameters:
     - text: The text string to render
     - x, y: Position of the text layer's top-left corner (default 0, 0)
-    - font: Font name, as listed by list_fonts (default "Sans", an alias for
-      "Sans-serif"). Common GIMP 2 aliases resolve to their GIMP 3 names; an
-      unknown name falls back to a default font and adds a warning to the result.
+    - font: Font name, as listed by list_fonts (default "Sans-serif"). Common
+      GIMP 2 aliases (such as "Sans") resolve to their GIMP 3 names; an unknown
+      name falls back to a default font and adds a warning to the result.
     - size: Font size in pixels (default 24)
     - color: Text color (CSS name, hex, or rgb() string; default "black")
     - image_index: Target image index (default 0)
