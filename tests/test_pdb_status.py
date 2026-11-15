@@ -665,10 +665,11 @@ def main():
               else f"got {r}")
     del OPEN_IMAGE.get_layers
 
-    # _render_visible keeps the component type but always uses the non-linear
-    # (sRGB) variant: GIMP's Precision values are 100 * type + 0 / 50 / 75.
+    # _render_visible renders 8-bit sources at 8 bits and anything deeper at
+    # 16 bits (all PNG holds), always non-linear (sRGB): GIMP's Precision
+    # values are 100 * type + 0 / 50 / 75.
     for source, expected in ((100, 150), (150, 150), (175, 150), (200, 250), (275, 250),
-                             (350, 350), (500, 550), (600, 650), (675, 650), (700, 750)):
+                             (350, 250), (500, 250), (600, 250), (675, 250), (700, 250)):
         PRECISIONS.clear()
         OPEN_IMAGE.get_precision = lambda source=source: source
         plugin._render_visible(OPEN_IMAGE, 0, 0, 10, 10).delete()

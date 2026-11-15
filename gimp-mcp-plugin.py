@@ -1901,14 +1901,18 @@ class MCPPlugin(Gimp.PlugIn):
         The caller deletes it. Commands run one at a time under command_lock, so
         no other command sees the temporary image in Gimp.get_images().
         """
-        # Keep the source's bit depth (PNG export writes 16-bit for anything above
-        # 8), but make the image non-linear sRGB: new_from_visible converts into
-        # it, so the PNG's pixels are sRGB as PNG readers assume. Copying the
-        # source's profile instead would leave e.g. Adobe RGB values in a PNG
-        # tagged sRGB, since file-png-export doesn't embed profiles by default.
-        # Precision values are 100 * component type plus 0 (linear),
-        # 50 (non-linear) or 75 (perceptual).
-        precision = Gimp.Precision(int(image.get_precision()) // 100 * 100 + 50)
+        # Render at 8 bits for an 8-bit source and at 16 bits for anything
+        # deeper: PNG holds at most 16 bits, so deeper sources give the same PNG
+        # at 16 bits, in half the memory for 32-bit and float and a quarter for
+        # double.
+        # The image is non-linear sRGB: new_from_visible converts into it, so
+        # the PNG's pixels are sRGB as PNG readers assume. Copying the source's
+        # profile instead would leave e.g. Adobe RGB values in a PNG tagged
+        # sRGB, since file-png-export doesn't embed profiles by default.
+        # Precision values are 100 * component type (1 = U8, 2 = U16, higher =
+        # deeper) plus 0 (linear), 50 (non-linear) or 75 (perceptual).
+        component_type = int(image.get_precision()) // 100
+        precision = Gimp.Precision(min(component_type, 2) * 100 + 50)
         temp = self._check_item(
             Gimp.Image.new_with_precision(width, height, Gimp.ImageBaseType.RGB, precision),
             "Creating the snapshot image")
