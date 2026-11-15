@@ -1035,15 +1035,7 @@ class MCPPlugin(Gimp.PlugIn):
                 temp_fd, temp_path = tempfile.mkstemp(suffix='.png')
                 os.close(temp_fd)  # Close the file descriptor as GIMP will handle the file
             
-                # Export the final image as PNG
-                # Get all layers - we'll export the flattened image
-                layers = final_image.get_layers()
-                if not layers:
-                    return {
-                        "status": "error",
-                        "error": "No layers found in the processed image"
-                    }
-
+                # Export the final image as PNG (_render_visible always gives it a layer)
                 # Export the image to PNG
                 try:
                     # In GIMP 3.0, use the simplified export approach

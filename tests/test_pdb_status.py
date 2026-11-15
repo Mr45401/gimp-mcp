@@ -339,18 +339,6 @@ def install_gi_stub():
             RGB = 0
 
         @staticmethod
-        def edit_copy(drawables):
-            pass
-
-        @staticmethod
-        def edit_paste(drawable, paste_into):
-            return ["floating"]
-
-        @staticmethod
-        def floating_sel_anchor(floating):
-            pass
-
-        @staticmethod
         def displays_flush():
             pass
 
