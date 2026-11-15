@@ -65,6 +65,7 @@ class FakeLayer:
         return False
 
     def set_offsets(self, *a):
+        CALLS.append(("layer", "set_offsets", a))
         return True
 
     def delete(self):
@@ -335,6 +336,7 @@ def install_gi_stub():
 
             @staticmethod
             def new_from_visible(image, dest_image, name):
+                CALLS.append(("layer", "new_from_visible", image, dest_image))
                 return FakeLayer()
 
         class LayerMode:
@@ -667,6 +669,27 @@ def main():
               None if r["status"] == "error" and "No visible layers" in r["error"] and not TEMP_IMAGES
               else f"got {r}")
     del OPEN_IMAGE.get_layers
+
+    for name, layers in (("a visible layer inside a visible group", [Layer(children=[Layer()])]),
+                         ("a visible layer inside nested groups", [Layer(children=[Layer(children=[Layer()])])]),
+                         ("a hidden layer above a visible one", [Layer(visible=False), Layer()])):
+        OPEN_IMAGE.get_layers = lambda layers=layers: layers
+        TEMP_IMAGES.clear()
+        r = plugin._get_current_image_bitmap({})
+        check(f"bitmap preview renders an image with {name}",
+              None if "No visible layers" not in r.get("error", "") and len(TEMP_IMAGES) == 1
+              else f"got {r}, temporary images {len(TEMP_IMAGES)}")
+    del OPEN_IMAGE.get_layers
+
+    # _render_visible renders the source image into the temporary one and
+    # moves the composite so the region's corner lands at (0, 0).
+    CALLS.clear()
+    TEMP_IMAGES.clear()
+    temp = plugin._render_visible(OPEN_IMAGE, 5, 7, 10, 10)
+    temp.delete()
+    check("_render_visible renders the source into its temporary image, offset by the region",
+          None if ("layer", "new_from_visible", OPEN_IMAGE, temp) in CALLS
+          and ("layer", "set_offsets", (-5, -7)) in CALLS else f"calls {CALLS}")
 
     # If the rendered layer can't be added, it isn't freed with the image, so
     # it is deleted on its own, and the image too.
