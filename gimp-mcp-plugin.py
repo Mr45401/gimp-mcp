@@ -1126,7 +1126,7 @@ class MCPPlugin(Gimp.PlugIn):
                         "original_height": orig_img_height,
                         "encoding": "base64",
                         "processing_applied": {
-                            "region_extracted": any(param is not None for param in [origin_x, origin_y, region_width, region_height]),
+                            "region_extracted": region_requested,
                             "scaled": target_width != current_width or target_height != current_height,
                             "region_coords": {"x": origin_x, "y": origin_y, "w": region_width, "h": region_height} if origin_x is not None else None
                         }
@@ -1915,6 +1915,9 @@ class MCPPlugin(Gimp.PlugIn):
         """
         temp = Gimp.Image.new(width, height, Gimp.ImageBaseType.RGB)
         try:
+            # new_from_visible renders the whole canvas, and the rectangle is cut
+            # out afterwards, so a small region of a large image still costs a
+            # full-size composite (8000x8000 RGBA is about 256 MB at 8 bits)
             layer = Gimp.Layer.new_from_visible(image, temp, "visible")
             temp.insert_layer(layer, None, 0)
             layer.set_offsets(-x, -y)
