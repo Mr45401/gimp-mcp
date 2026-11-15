@@ -1919,9 +1919,9 @@ class MCPPlugin(Gimp.PlugIn):
             # out afterwards, so a small region of a large image still costs a
             # full-size composite (8000x8000 RGBA is about 256 MB at 8 bits)
             layer = Gimp.Layer.new_from_visible(image, temp, "visible")
-            temp.insert_layer(layer, None, 0)
-            layer.set_offsets(-x, -y)
-            layer.resize_to_image_size()
+            self._check_ok(temp.insert_layer(layer, None, 0), "Adding the visible layer")
+            self._check_ok(layer.set_offsets(-x, -y), "Positioning the visible layer")
+            self._check_ok(layer.resize_to_image_size(), "Cropping the visible layer")
         except Exception:
             temp.delete()
             raise
