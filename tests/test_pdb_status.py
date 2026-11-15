@@ -67,6 +67,9 @@ class FakeLayer:
     def set_offsets(self, *a):
         return True
 
+    def delete(self):
+        CALLS.append(("layer", "delete"))
+
     def resize_to_image_size(self):
         return True
 
@@ -664,6 +667,21 @@ def main():
               None if r["status"] == "error" and "No visible layers" in r["error"] and not TEMP_IMAGES
               else f"got {r}")
     del OPEN_IMAGE.get_layers
+
+    # If the rendered layer can't be added, it isn't freed with the image, so
+    # it is deleted on its own, and the image too.
+    CALLS.clear()
+    TEMP_IMAGES.clear()
+    insert_layer = FakeImage.insert_layer
+    FakeImage.insert_layer = lambda self, *a: False
+    try:
+        reason = raises(lambda: plugin._render_visible(OPEN_IMAGE, 0, 0, 10, 10), "Adding the visible layer")
+    finally:
+        FakeImage.insert_layer = insert_layer
+    check("_render_visible deletes the layer and image when adding the layer fails",
+          reason or (None if ("layer", "delete") in CALLS and len(TEMP_IMAGES) == 1
+                     and all(i.deleted for i in TEMP_IMAGES)
+                     else f"calls {CALLS}, temporary images {TEMP_IMAGES}"))
 
     # _render_visible renders 8-bit sources at 8 bits and anything deeper at
     # 16 bits (all PNG holds), always non-linear (sRGB): GIMP's Precision

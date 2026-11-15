@@ -1916,6 +1916,7 @@ class MCPPlugin(Gimp.PlugIn):
         temp = self._check_item(
             Gimp.Image.new_with_precision(width, height, Gimp.ImageBaseType.RGB, precision),
             "Creating the snapshot image")
+        layer, inserted = None, False
         try:
             # new_from_visible renders the whole canvas, and the rectangle is cut
             # out afterwards, so a small region of a large image still costs a
@@ -1923,10 +1924,20 @@ class MCPPlugin(Gimp.PlugIn):
             layer = self._check_item(Gimp.Layer.new_from_visible(image, temp, "visible"),
                                      "Rendering the visible layers")
             self._check_ok(temp.insert_layer(layer, None, 0), "Adding the visible layer")
+            inserted = True
             self._check_ok(layer.set_offsets(-x, -y), "Positioning the visible layer")
             self._check_ok(layer.resize_to_image_size(), "Cropping the visible layer")
         except Exception:
-            temp.delete()
+            # Deleting the image frees only the layers it holds. Report the
+            # original error, not one from the cleanup.
+            cleanup = [temp.delete]
+            if layer is not None and not inserted:
+                cleanup.insert(0, layer.delete)
+            for delete in cleanup:
+                try:
+                    delete()
+                except Exception:
+                    pass
             raise
         return temp
 
