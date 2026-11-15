@@ -934,6 +934,12 @@ class MCPPlugin(Gimp.PlugIn):
                         "error": "For region selection, all parameters are required: origin_x, origin_y, width, height"
                     }
 
+                if region_width < 1 or region_height < 1:
+                    return {
+                        "status": "error",
+                        "error": f"Region width and height must be at least 1, got {region_width}x{region_height}"
+                    }
+
                 # Validate region bounds
                 if (origin_x < 0 or origin_y < 0 or
                     origin_x + region_width > orig_img_width or
