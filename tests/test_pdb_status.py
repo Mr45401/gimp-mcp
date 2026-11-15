@@ -54,6 +54,22 @@ class FakeLayer:
     def get_id(self):
         return 7
 
+    # A visible, opaque layer, as the bitmap preview needs one to render
+    def get_visible(self):
+        return True
+
+    def get_opacity(self):
+        return 100.0
+
+    def is_group(self):
+        return False
+
+    def set_offsets(self, *a):
+        return True
+
+    def resize_to_image_size(self):
+        return True
+
 
 class FakeValueArray:
     """Stand-in for Gimp.ValueArray as returned by Gimp.Procedure.run()."""
@@ -180,7 +196,7 @@ class FakeImage:
         return ["layer"]
 
     def get_layers(self):
-        return ["layer"]
+        return [FakeLayer()]
 
 
 class LayerlessImage(FakeImage):
@@ -301,8 +317,15 @@ def install_gi_stub():
             def new(*a):
                 return "region-layer"
 
+            @staticmethod
+            def new_from_visible(image, dest_image, name):
+                return FakeLayer()
+
         class LayerMode:
             NORMAL = 28
+
+        class ImageBaseType:
+            RGB = 0
 
         @staticmethod
         def edit_copy(drawables):
@@ -569,15 +592,15 @@ def main():
     r = plugin._batch_resize({"scale_factor": 0.5})
     check("batch_resize reports an error when scaling an open image fails",
           None if r["status"] == "error" and "contents are locked" in r["error"] else f"got {r}")
-    # The bitmap preview of a region makes two temporary images; a failed
-    # scale must delete both, and never the open image.
+    # The bitmap preview renders a region into one temporary image and scales
+    # it in place; a failed scale must delete it, and never the open image.
     scenario({})
     TEMP_IMAGES.clear()
     r = plugin._get_current_image_bitmap({"region": {"origin_x": 0, "origin_y": 0, "width": 50,
                                                      "height": 50, "max_width": 10, "max_height": 10}})
-    check("bitmap preview deletes both temporary images, not the open one, when scaling fails",
+    check("bitmap preview deletes its temporary image, not the open one, when scaling fails",
           None if r["status"] == "error" and "Scaling the preview copy" in r["error"]
-          and len(TEMP_IMAGES) == 2 and all(i.deleted for i in TEMP_IMAGES)
+          and len(TEMP_IMAGES) == 1 and all(i.deleted for i in TEMP_IMAGES)
           and not OPEN_IMAGE.deleted
           else f"got {r.get('error', r)}, temp deleted {[i.deleted for i in TEMP_IMAGES]}, "
                f"open deleted {OPEN_IMAGE.deleted}")
