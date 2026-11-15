@@ -3660,6 +3660,15 @@ class MCPPlugin(Gimp.PlugIn):
             new_color   = params.get("color", None)
             image    = self._get_image(image_index)
             layer    = self._resolve_layer(image, layer_name, None)
+            # gimp-text-layer-set-font takes a Gimp.Font, not a name. Resolve it
+            # before any edit. _resolve_font falls back to a close match or a
+            # default font, so this only fails if GIMP has no fonts at all.
+            font_obj = None
+            if new_font is not None:
+                font_obj = self._resolve_font(new_font)
+                if font_obj is None:
+                    return {"status": "error",
+                            "error": f"edit_text: no font found for {new_font!r}"}
             image.undo_group_start()
             try:
                 if new_text is not None:
@@ -3672,7 +3681,7 @@ class MCPPlugin(Gimp.PlugIn):
                     proc = self._lookup_pdb("gimp-text-layer-set-font")
                     cfg = proc.create_config()
                     cfg.set_property("layer", layer)
-                    cfg.set_property("font",  new_font)
+                    cfg.set_property("font",  font_obj)
                     self._run_pdb(proc, cfg)
                 if new_size is not None:
                     proc = self._lookup_pdb("gimp-text-layer-set-font-size")
@@ -3690,7 +3699,11 @@ class MCPPlugin(Gimp.PlugIn):
             finally:
                 image.undo_group_end()
             Gimp.displays_flush()
-            return {"status": "success", "results": {"status": "success"}}
+            results = {"status": "success"}
+            if font_obj is not None:
+                # _resolve_font may pick a close match or a fallback, so report it.
+                results["font"] = font_obj.get_name()
+            return {"status": "success", "results": results}
         except Exception as e:
             return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
 
@@ -4149,10 +4162,73 @@ class MCPPlugin(Gimp.PlugIn):
         except Exception as e:
             return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
 
+    def _render_frame(self, src, width, height, keep_position, dest_image, what):
+        """Render a drawable as GIMP shows it into a new layer of dest_image.
+
+        Used for sprite sheet frames. The source is copied into a scratch image
+        of the frame's size, and the copy's visible result becomes the frame
+        (Gimp.Layer.new_from_visible). GIMP's own rendering then applies the
+        mask, live filters and group children, and the scratch canvas crops
+        the frame to its cell, so effects can't spill into the padding.
+
+        new_from_drawable() also copies settings that only control how a layer
+        is composited, and some would change or hide the frame. Checked against
+        every setter Gimp.Layer has in GIMP 3.2, the copy is made visible, 100%
+        opacity, NORMAL mode, AUTO composite mode, blend and composite spaces,
+        with no locks. Masks shown for editing are hidden on the copy and on
+        every layer inside it. Whether the mask is applied is kept, as GIMP
+        shows it. Settings that don't affect pixels (name, color tag, tattoo,
+        expanded, edit mask) are left alone.
+
+        With keep_position the copy keeps its offsets (its place on its own
+        canvas); otherwise its top-left corner goes to the frame's origin.
+        Returns the new layer, not yet inserted into dest_image.
+        """
+        scratch = Gimp.Image.new(width, height, Gimp.ImageBaseType.RGB)
+        try:
+            scratch.undo_disable()
+            layer = self._check_item(Gimp.Layer.new_from_drawable(src, scratch),
+                                     f"Copying {what}")
+            self._check_ok(scratch.insert_layer(layer, None, 0), f"Adding {what}")
+            # Unlock first: a locked visibility makes set_visible() a silent
+            # no-op, and the other locks would block the move and alpha below.
+            # A group can't move while a child is locked, so go through the
+            # whole copied tree. Only the copy changes; the source keeps its
+            # locks and mask settings.
+            items = [layer]
+            for item in items:
+                items.extend(item.get_children() if isinstance(item, Gimp.GroupLayer) else [])
+                for unlock in (item.set_lock_visibility, item.set_lock_position,
+                               item.set_lock_content, item.set_lock_alpha):
+                    self._check_ok(unlock(False), f"Unlocking {what}")
+                # A mask shown for editing (Alt-click), on the frame or a layer
+                # in it, would render as the mask itself.
+                if item.get_mask():
+                    self._check_ok(item.set_show_mask(False), f"Hiding the mask of {what}")
+            if not keep_position:
+                self._check_ok(layer.set_offsets(0, 0), f"Placing {what}")
+            if not layer.has_alpha():
+                # Without alpha the scratch image would render opaque.
+                self._check_ok(layer.add_alpha(), f"Adding alpha to {what}")
+            self._check_ok(layer.set_visible(True), f"Showing {what}")
+            self._check_ok(layer.set_opacity(100.0), f"Setting the opacity of {what}")
+            self._check_ok(layer.set_mode(Gimp.LayerMode.NORMAL), f"Setting the mode of {what}")
+            # set_mode() keeps the composite mode when the mode was already
+            # NORMAL; CLIP_TO_BACKDROP would hide the frame on the empty canvas.
+            self._check_ok(layer.set_composite_mode(Gimp.LayerCompositeMode.AUTO),
+                           f"Setting the composite mode of {what}")
+            self._check_ok(layer.set_blend_space(Gimp.LayerColorSpace.AUTO),
+                           f"Setting the blend space of {what}")
+            self._check_ok(layer.set_composite_space(Gimp.LayerColorSpace.AUTO),
+                           f"Setting the composite space of {what}")
+            return self._check_item(Gimp.Layer.new_from_visible(scratch, dest_image, what),
+                                    f"Rendering {what}")
+        finally:
+            scratch.delete()
+
     def _export_sprite_sheet(self, params):
         """Combine frames into a sprite sheet."""
         try:
-            from gi.repository import Gegl
             output_path = params.get("output_path", "")
             columns     = params.get("columns", None)
             padding     = int(params.get("padding", 0))
@@ -4170,8 +4246,8 @@ class MCPPlugin(Gimp.PlugIn):
                 return {"status": "error", "error": "No frames found"}
 
             # Use first frame dimensions as the cell size
-            frame_w = frames[0].get_width()  if hasattr(frames[0], 'get_width')  else frames[0].get_width()
-            frame_h = frames[0].get_height() if hasattr(frames[0], 'get_height') else frames[0].get_height()
+            frame_w = frames[0].get_width()
+            frame_h = frames[0].get_height()
             n = len(frames)
             cols = int(columns) if columns else max(1, math.ceil(math.sqrt(n)))
             rows = math.ceil(n / cols)
@@ -4179,14 +4255,20 @@ class MCPPlugin(Gimp.PlugIn):
             sheet_w = cols * frame_w + (cols - 1) * padding
             sheet_h = rows * frame_h + (rows - 1) * padding
 
-            sheet = Gimp.Image.new(sheet_w, sheet_h, Gimp.ImageBaseType.RGBA)
+            # ImageBaseType has no RGBA; alpha comes from the RGBA_IMAGE layer below.
+            sheet = Gimp.Image.new(sheet_w, sheet_h, Gimp.ImageBaseType.RGB)
             try:
+                # A scratch image: don't keep undo history for its edits.
+                sheet.undo_disable()
                 bg_layer = Gimp.Layer.new(sheet, "Background", sheet_w, sheet_h, Gimp.ImageType.RGBA_IMAGE, 100, Gimp.LayerMode.NORMAL)
-                sheet.insert_layer(bg_layer, None, 0)
-                Gimp.context_set_background(Gegl.Color.new("transparent"))
+                self._check_ok(sheet.insert_layer(bg_layer, None, 0),
+                               "Adding the sprite sheet background")
+                # TRANSPARENT fill doesn't use the context background color.
                 self._check_ok(Gimp.Drawable.edit_fill(bg_layer, Gimp.FillType.TRANSPARENT),
                                "Clearing the sprite sheet")
 
+                # Render each frame into a layer of the sheet. Unlike copy/paste,
+                # this leaves the user's selection and clipboard alone.
                 for i, frame in enumerate(frames):
                     col = i % cols
                     row = i // cols
@@ -4196,17 +4278,19 @@ class MCPPlugin(Gimp.PlugIn):
                         src_layers = frame.get_layers()
                         if not src_layers:
                             continue
-                        src_drawable = src_layers[0]
-                        frame.select_rectangle(Gimp.ChannelOps.REPLACE, 0, 0, frame.get_width(), frame.get_height())
+                        # Keep the layer where it sits in its image.
+                        src_drawable, keep_position = src_layers[0], True
                     else:
-                        src_drawable = frame
-                        frame.get_image().select_rectangle(Gimp.ChannelOps.REPLACE, 0, 0, frame_w, frame_h)
-                    Gimp.edit_copy([src_drawable])
-                    pasted = Gimp.edit_paste(bg_layer, True)[0]
-                    pasted.set_offsets(dest_x, dest_y)
-                    Gimp.floating_sel_anchor(pasted)
+                        src_drawable, keep_position = frame, False
+                    frame_layer = self._render_frame(src_drawable, frame_w, frame_h,
+                                                     keep_position, sheet, f"frame {i}")
+                    self._check_ok(sheet.insert_layer(frame_layer, None, 0), f"Adding frame {i}")
+                    self._check_ok(frame_layer.set_offsets(dest_x, dest_y),
+                                   f"Placing frame {i}")
 
-                self._export_to_path(sheet, output_path, "png", 95, True)
+                # flatten=False keeps the transparent background between frames;
+                # the PNG export merges the visible layers.
+                self._export_to_path(sheet, output_path, "png", 95, False)
             finally:
                 sheet.delete()
             return {
