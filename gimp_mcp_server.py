@@ -2371,14 +2371,14 @@ def edit_text(
     Parameters:
     - layer_name: Name of the text layer to edit
     - text: New text content (omit to leave unchanged)
-    - font: New font name, as listed by list_fonts (omit to leave unchanged).
-      Common GIMP 2 aliases resolve to their GIMP 3 names; an unknown name falls
+    - font: New font name, as listed by list_fonts (omit, or pass an empty name,
+      to leave unchanged). Common GIMP 2 aliases resolve to their GIMP 3 names; an unknown name falls
       back to a default font and adds a warning to the result.
     - size: New font size in pixels (omit to leave unchanged)
     - color: New text color (omit to leave unchanged)
     - image_index: Target image index (default 0)
 
-    Returns {status}, plus font (the applied font) when font was given,
+    Returns {status}, plus font (the applied font) when a font name was given,
     requested_font when it differs from font, and warning when a fallback font
     was substituted.
     """

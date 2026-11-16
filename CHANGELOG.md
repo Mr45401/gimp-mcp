@@ -30,9 +30,9 @@ right command when the versions differ.
 - `export_sprite_sheet` works on GIMP 3. It failed every time with
   `ImageBaseType has no attribute 'RGBA'`, and the sheet now keeps its transparent background
   instead of being flattened (#64).
-- `edit_text` can change a text layer's font. Passing `font` always failed on GIMP 3.2. When `font`
-  is given, the result now includes `font` (the applied font), `requested_font` when it differs from
-  `font`, and a `warning` when the requested font wasn't found and a default was substituted
+- `edit_text` can change a text layer's font. Passing `font` always failed on GIMP 3.2. When a font
+  name is given, the result now includes `font` (the applied font), `requested_font` when it differs
+  from `font`, and a `warning` when the requested font wasn't found and a default was substituted
   (#64, #124).
 - `export_image`, `batch_export`, `export_web_optimized` and `export_icon_sizes` now write real
   JPEG, WebP, TIFF and BMP files. They used GIMP 2 procedure names that GIMP 3 doesn't have, so

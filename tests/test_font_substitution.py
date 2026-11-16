@@ -93,6 +93,7 @@ class FakeImage:
     def __init__(self):
         self.layers = []
         self.undo_depth = 0
+        self.undo_groups_started = 0
 
     def get_layers(self):
         return list(self.layers)
@@ -103,6 +104,7 @@ class FakeImage:
 
     def undo_group_start(self):
         self.undo_depth += 1
+        self.undo_groups_started += 1
 
     def undo_group_end(self):
         self.undo_depth -= 1
@@ -293,6 +295,7 @@ def reset_scene(*font_names, native_ok=True):
     set_fonts(*font_names)
     OPEN_IMAGE.layers.clear()
     OPEN_IMAGE.undo_depth = 0
+    OPEN_IMAGE.undo_groups_started = 0
     PDB_CONFIGS.clear()
     PDB_PROCS.clear()
     PDB_PROCS.update({
@@ -471,7 +474,7 @@ def main():
         check("add_text returns an error without opening an undo group when GIMP has no fonts",
               r["status"] == "error"
               and "Comic Snas" in r.get("error", "")
-              and OPEN_IMAGE.undo_depth == 0
+              and OPEN_IMAGE.undo_groups_started == 0
               and not OPEN_IMAGE.layers,
               str(r))
 
@@ -503,13 +506,14 @@ def main():
               and layer_obj.get_font().get_name() == "Serif",
               str(r))
 
-        r = plugin._edit_text({"layer_name": layer_name, "font": ""})
-        res = r.get("results", {})
-        check("edit_text empty font selects default 'Sans-serif' without requested_font or warning",
-              r["status"] == "success"
-              and res == {"status": "success", "font": "Sans-serif"}
-              and layer_obj.get_font().get_name() == "Sans-serif",
-              str(r))
+        for blank in ("", "   "):
+            r = plugin._edit_text({"layer_name": layer_name, "font": blank})
+            res = r.get("results", {})
+            check(f"edit_text blank font {blank!r} leaves the font unchanged and adds no font fields",
+                  r["status"] == "success"
+                  and res == {"status": "success"}
+                  and layer_obj.get_font().get_name() == "Serif",
+                  str(r))
 
         r = plugin._edit_text({"layer_name": layer_name, "font": "Sans"})
         res = r.get("results", {})

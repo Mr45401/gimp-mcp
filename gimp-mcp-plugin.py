@@ -3809,6 +3809,10 @@ class MCPPlugin(Gimp.PlugIn):
             layer_name  = params.get("layer_name", "")
             new_text    = params.get("text", None)
             new_font    = params.get("font", None)
+            # A blank font leaves the font unchanged, as if it were omitted:
+            # clients often send "" for optional arguments.
+            if isinstance(new_font, str) and not new_font.strip():
+                new_font = None
             new_size    = params.get("size", None)
             new_color   = params.get("color", None)
             image    = self._get_image(image_index)

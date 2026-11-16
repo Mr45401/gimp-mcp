@@ -194,15 +194,17 @@ def assert_substituted(tool, res, layer_name, requested, expected_fallback):
 
 
 def main():
-    connected = False
+    needs_cleanup = False
     try:
+        # Discovery already defines _t124_* names in GIMP, so clean up even if
+        # it fails.
+        needs_cleanup = True
         (
             exact_font,
             (alias_name, alias_target),
             expected_fallback,
             has_sans_serif,
         ) = discover_font_cases()
-        connected = True
         py(
             "from gi.repository import Gimp",
             "_t124_img = Gimp.Image.new(240, 120, Gimp.ImageBaseType.RGB)",
@@ -264,16 +266,18 @@ def main():
             fail(f"edit_text exact failed: {r}")
         assert_exact("edit_text", r["results"], exact_layer, exact_font)
 
-        r = cmd("edit_text", {"image_index": image_index(), "layer_name": exact_layer,
-                              "font": ""})
-        if r.get("status") != "success":
-            fail(f"edit_text empty font failed: {r}")
-        assert_exact("edit_text (empty)", r["results"], exact_layer, expected_fallback)
-
-        r = cmd("edit_text", {"image_index": image_index(), "layer_name": exact_layer,
-                              "font": exact_font})
-        if r.get("status") != "success":
-            fail(f"edit_text reset exact failed: {r}")
+        for blank in ("", "   "):
+            r = cmd("edit_text", {"image_index": image_index(), "layer_name": exact_layer,
+                                  "font": blank})
+            if r.get("status") != "success":
+                fail(f"edit_text blank font {blank!r} failed: {r}")
+            for unexpected in ("font", "requested_font", "warning"):
+                if unexpected in r["results"]:
+                    fail(f"edit_text blank font {blank!r} returned {unexpected!r}: {r['results']}")
+            if layer_font_name(exact_layer) != exact_font:
+                fail(f"edit_text blank font {blank!r} changed the font to "
+                     f"{layer_font_name(exact_layer)!r}, expected {exact_font!r}")
+        print("PASS: edit_text with a blank font leaves the font unchanged")
 
         r = cmd("edit_text", {"image_index": image_index(), "layer_name": exact_layer,
                               "font": UNKNOWN_FONT})
@@ -293,7 +297,7 @@ def main():
     except ConnectionRefusedError:
         fail(f"GIMP MCP plugin not reachable on {HOST}:{PORT} (Tools > MCP > Start MCP Server)")
     finally:
-        if connected:
+        if needs_cleanup:
             try:
                 py("if '_t124_img' in globals() and _t124_img.is_valid(): _t124_img.delete()")
             except (SystemExit, OSError):
