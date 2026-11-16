@@ -648,6 +648,8 @@ class MCPPlugin(Gimp.PlugIn):
             # ── Category 1: File Operations ──────────────────────────────────
             elif "type" in j and j["type"] == "open_image":
                 return self._open_image(j.get("params", {}))
+            elif "type" in j and j["type"] == "open_image_as_layer":
+                return self._open_image_as_layer(j.get("params", {}))
             elif "type" in j and j["type"] == "save_xcf":
                 return self._save_xcf(j.get("params", {}))
             elif "type" in j and j["type"] == "export_image":
@@ -2187,6 +2189,111 @@ class MCPPlugin(Gimp.PlugIn):
                     "color_mode":    mode_map.get(base_type, str(base_type)),
                     "num_layers":    len(image.get_layers()),
                     "display_opened": display_opened,
+                }
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
+
+    def _open_image_as_layer(self, params):
+        """Import an image file as one new layer in an open image.
+
+        The file is loaded into a temporary image with no display, and
+        Gimp.Layer.new_from_visible() turns its visible composite into a layer
+        of the target image. That keeps transparency, converts to the target's
+        color mode, and keeps content where it sits on the source canvas.
+        """
+        try:
+            from gi.repository import Gio
+            file_path = params.get("file_path", "")
+            if not file_path:
+                return {"status": "error", "error": "file_path is required"}
+            image_index = int(params.get("image_index", 0))
+            layer_name = (params.get("layer_name")
+                          or os.path.splitext(os.path.basename(file_path))[0])
+            position = int(params.get("position", 0))
+            if position < 0:
+                return {"status": "error",
+                        "error": f"position must be >= 0 (0 = top), got {position}"}
+            scale = str(params.get("scale") or "none").lower()
+            if scale not in ("none", "fit", "canvas"):
+                return {"status": "error",
+                        "error": f"Invalid scale '{scale}' (use 'none', 'fit' or 'canvas')"}
+            offset_x = params.get("offset_x")
+            offset_y = params.get("offset_y")
+
+            # A relative path would resolve against GIMP's working directory, which
+            # the client can't know. (The MCP server expands "~": GIMP's own home
+            # can differ, e.g. a Snap GIMP's.)
+            if not os.path.isabs(file_path):
+                return {"status": "error",
+                        "error": f"file_path must be an absolute path, got '{file_path}'"}
+            if os.path.isdir(file_path):
+                return {"status": "error",
+                        "error": f"{file_path} is a directory, not an image file"}
+            # GIMP's own error for a missing file is cryptic ("... out of range").
+            if not os.path.isfile(file_path):
+                return {"status": "error", "error": f"File not found: {file_path}"}
+            # Resolve the target before loading: Gimp.get_images() lists the
+            # newest image first, so the temporary image would shift the indices.
+            target = self._get_image(image_index)
+            canvas_w, canvas_h = target.get_width(), target.get_height()
+            loaded = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(file_path))
+            # GIMP returns None for a missing file and for one it can't read;
+            # _check_item adds GIMP's own error message, which tells them apart.
+            self._check_item(loaded, f"Opening {file_path}")
+            # Everything up to insert_layer() works on the temporary image or on a
+            # layer that isn't in the target yet, so a failure leaves the target
+            # untouched: no layer, no undo step, not marked dirty.
+            layer = None
+            inserted = False
+            try:
+                try:
+                    src_w, src_h = loaded.get_width(), loaded.get_height()
+                    if scale != "none" and loaded.get_base_type() == Gimp.ImageBaseType.INDEXED:
+                        # GIMP never interpolates indexed images, so scaling one as
+                        # it is gives hard, blocky edges.
+                        self._check_ok(loaded.convert_rgb(), "Converting the image to RGB")
+                    if scale == "fit":
+                        factor = min(canvas_w / src_w, canvas_h / src_h)
+                        self._check_ok(loaded.scale(max(1, round(src_w * factor)),
+                                                    max(1, round(src_h * factor))),
+                                       "Scaling the image")
+                    elif scale == "canvas":
+                        self._check_ok(loaded.scale(canvas_w, canvas_h), "Scaling the image")
+                    layer = self._check_item(Gimp.Layer.new_from_visible(loaded, target, layer_name),
+                                             "Creating a layer from the file")
+                finally:
+                    # The temporary image never had a display, so delete() removes it.
+                    loaded.delete()
+                w, h = layer.get_width(), layer.get_height()
+                x = int(offset_x) if offset_x is not None else (canvas_w - w) // 2
+                y = int(offset_y) if offset_y is not None else (canvas_h - h) // 2
+                self._check_ok(layer.set_offsets(x, y), "Moving the layer")
+                self._check_ok(target.insert_layer(layer, None, position), "Inserting the layer")
+                inserted = True
+            except Exception:
+                # A layer that never made it into the target must be freed here.
+                # (Its get_image() is already the target, so it can't tell us.)
+                if layer is not None and not inserted:
+                    try:
+                        layer.delete()
+                    except Exception:
+                        pass
+                raise
+            Gimp.displays_flush()
+            _, actual_x, actual_y = layer.get_offsets()
+            return {
+                "status": "success",
+                "results": {
+                    "layer_name":    layer.get_name(),
+                    "layer_id":      layer.get_id(),
+                    "width":         layer.get_width(),
+                    "height":        layer.get_height(),
+                    "offset_x":      actual_x,
+                    "offset_y":      actual_y,
+                    "position":      target.get_item_position(layer),
+                    "source_width":  src_w,
+                    "source_height": src_h,
                 }
             }
         except Exception as e:

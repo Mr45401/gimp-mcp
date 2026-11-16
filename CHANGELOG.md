@@ -13,7 +13,17 @@ right command when the versions differ.
 
 ## [Unreleased]
 
+### Added
+- `open_image_as_layer` imports an image file as a new layer in an open image, without
+  opening it in its own window. A multi-layer file is merged into one layer with its
+  transparency kept. The layer can be scaled to fit the canvas or stretched to its size,
+  and is centered unless offsets are given. Based on #61 by @kabachuha.
+
 ### Fixed
+- The `create_layer` and `reorder_layer` docs said position 0 is the bottom of the layer stack.
+  In GIMP it is the top, so asking for the bottom put the layer on top. The docs now match
+  GIMP: positions count from the top, and `create_layer`'s default -1 means directly above
+  the selected layer (#129).
 - `add_text` no longer replaces an unknown font silently. Its default font is now `Sans-serif`, and
   its result reports `font` (the applied font), `requested_font` when it differs from `font`, and a
   `warning` naming both fonts when a default font was substituted (#124).
